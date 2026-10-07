@@ -4,7 +4,7 @@
 
 ## 1. 先準備 GitHub
 
-倉庫為 [LittleSurvival/novelia-toolbox](https://github.com/LittleSurvival/novelia-toolbox)。Workflow 已放在 `.github/workflows/`；`dist` 不需要放在 main，首次推送版本 tag 後會建立獨立的 `release-dist` 成品分支。
+倉庫為 [LittleSurvival/novelia-toolbox](https://github.com/LittleSurvival/novelia-toolbox)。Workflow 已放在 `.github/workflows/`；`dist` 不需要放在 main，首次推送版本 tag 後會建立獨立的 `dist` 成品分支。
 
 目前基準為 `0.7.0`。第一次發布修正版建議使用 **0.7.1**：修改 `package.json` 的 version，執行 `npm install --package-lock-only --ignore-scripts --no-audit --no-fund`、`npm run format`，再提交 version 與 lockfile。保持腳本 name、namespace 及 Greasy Fork ID **527754**。
 
@@ -16,7 +16,7 @@ git tag v0.7.1
 git push origin v0.7.1
 ```
 
-到 GitHub Actions 等待 Release workflow 成功，確認 `release-dist` 分支根目錄有 `.user.js` 與 `.meta.js`，並確認下節 Raw 網址可以開啟程式碼。此時才設定 Greasy Fork，避免第一次同步讀到 404。
+到 GitHub Actions 等待 Release workflow 成功，確認 `dist` 分支根目錄有 `.user.js` 與 `.meta.js`，並確認下節 Raw 網址可以開啟程式碼。此時才設定 Greasy Fork，避免第一次同步讀到 404。
 
 ## 2. 已提供的 Actions
 
@@ -25,7 +25,7 @@ git push origin v0.7.1
 
 Release 使用 GitHub 自帶的 GITHUB_TOKEN，不需要額外 Token 或 Greasy Fork Secret。僅 Release 具有 contents write 權限；CI 為唯讀。
 
-成品包含 novelia-toolbox.user.js、novelia-toolbox.meta.js 與 SHA256SUMS。先完成 GitHub Release 附件，再推送 release-dist 供 Greasy Fork 同步。流程拒絕降低已發布版號、修改已發布的同版本內容；可重跑中斷的 workflow，已公開附件會核對而不覆寫。
+成品包含 novelia-toolbox.user.js、novelia-toolbox.meta.js 與 SHA256SUMS。先完成 GitHub Release 附件，再推送 dist 供 Greasy Fork 同步。流程拒絕降低已發布版號、修改已發布的同版本內容；可重跑中斷的 workflow，已公開附件會核對而不覆寫。
 
 目前尚未推送正式版本 tag，Release 的實際發布結果須於首次發布時確認。
 
@@ -44,7 +44,7 @@ Release 使用 GitHub 自帶的 GITHUB_TOKEN，不需要額外 Token 或 Greasy 
 同步原始碼網址：
 
 ```text
-https://raw.githubusercontent.com/LittleSurvival/novelia-toolbox/release-dist/novelia-toolbox.user.js
+https://raw.githubusercontent.com/LittleSurvival/novelia-toolbox/dist/novelia-toolbox.user.js
 ```
 
 填入後按「**更新設定並同步腳本**」。確認 Greasy Fork 顯示新版本，程式碼頁是可讀的新 bundle，原本腳本 ID 沒有改變。Raw URL 必須先存在；若 404，不要改填 TypeScript 原始檔或 meta-only 檔案。
@@ -64,13 +64,13 @@ https://raw.githubusercontent.com/LittleSurvival/novelia-toolbox/release-dist/no
 | Which events | **Just the push event** |
 | Active | 勾選 |
 
-GitHub 會送 ping。之後 `release-dist` 的已存在成品檔修改時，push webhook 會通知 Greasy Fork 更新；main 的日常提交不改變同步來源。首次建立分支與新增成品檔時仍按前節做一次手動同步。
+GitHub 會送 ping。之後 `dist` 的已存在成品檔修改時，push webhook 會通知 Greasy Fork 更新；main 的日常提交不改變同步來源。首次建立分支與新增成品檔時仍按前節做一次手動同步。
 
 ## 5. 之後每一版
 
 1. 修改程式與 version，例如 `0.7.1` → `0.7.2`，同步 lockfile、格式化並提交到 main。
 2. 推送 main，再推同版號的 tag `v0.7.2`。
-3. 確認 Actions 成功、GitHub 附件與 `release-dist` metadata 都是 `0.7.2`。
+3. 確認 Actions 成功、GitHub 附件與 `dist` metadata 都是 `0.7.2`。
 4. 確認 GitHub webhook 最近一次 delivery 成功、Greasy Fork 顯示新版本。
 5. 使用者的 Tampermonkey 按自己的更新設定取得新版本；可以從管理頁手動檢查更新。
 

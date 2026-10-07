@@ -46,9 +46,9 @@ jobs:
           publish_path="$RUNNER_TEMP/userscript-publish"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          if git show-ref --verify --quiet refs/remotes/origin/release-dist; then
-            git fetch origin release-dist:refs/remotes/origin/release-dist
-            git worktree add -B release-dist "$publish_path" origin/release-dist
+          if git show-ref --verify --quiet refs/remotes/origin/dist; then
+            git fetch origin dist:refs/remotes/origin/dist
+            git worktree add -B dist "$publish_path" origin/dist
             node --input-type=module -e '
               import fs from "node:fs";
               const current = JSON.parse(fs.readFileSync("package.json", "utf8")).version;
@@ -68,7 +68,7 @@ jobs:
             ' "$publish_path/novelia-toolbox.meta.js" "$publish_path/novelia-toolbox.user.js"
           else
             git worktree add --detach "$publish_path" HEAD
-            git -C "$publish_path" switch --orphan release-dist
+            git -C "$publish_path" switch --orphan dist
           fi
           (cd dist && sha256sum novelia-toolbox.user.js novelia-toolbox.meta.js > SHA256SUMS)
           cp dist/novelia-toolbox.user.js dist/novelia-toolbox.meta.js dist/SHA256SUMS "$publish_path/"
@@ -98,5 +98,5 @@ jobs:
           set -euo pipefail
           if ! git -C "$PUBLISH_PATH" diff --cached --quiet; then
             git -C "$PUBLISH_PATH" commit -m "Publish $GITHUB_REF_NAME"
-            git -C "$PUBLISH_PATH" push origin HEAD:release-dist
+            git -C "$PUBLISH_PATH" push origin HEAD:dist
           fi

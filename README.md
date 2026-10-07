@@ -114,4 +114,4 @@ npm run format:check   # 檢查程式碼格式
 
 入口是 `src/main.ts`；`modules/` 放功能、`services/` 放資料與網站操作、`ui/` 放介面、`interfaces/` 和 `types/` 放型別、`util/` 放輔助函數。
 
-推送 `main` 或 PR 會執行 CI；推送與 `package.json` 相同版號的 `vX.Y.Z` tag（例如 `v0.7.1`）會建立 GitHub Release 並更新 `release-dist`。Greasy Fork 首次同步與 webhook 設定請看 [發布說明](docs/greasyfork-publishing.md)。
+推送 `main` 或 PR 會執行 CI；推送與 `package.json` 相同版號的 `vX.Y.Z` tag（例如 `v0.7.1`）會建立 GitHub Release 並更新 `dist`。Greasy Fork 首次同步與 webhook 設定請看 [發布說明](docs/greasyfork-publishing.md)。
