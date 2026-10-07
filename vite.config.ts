@@ -4,7 +4,9 @@ import { readFileSync } from 'node:fs';
 import manifest from './package.json' with { type: 'json' };
 
 const version = manifest.version;
-const license = readFileSync(new URL('./LICENSE', import.meta.url), 'utf8').trim();
+const license = readFileSync(new URL('./LICENSE', import.meta.url), 'utf8')
+    .replace(/\r\n?/g, '\n')
+    .trim();
 
 export default defineConfig(({ command }) => ({
     build: { target: 'es2022', minify: false, sourcemap: false },
