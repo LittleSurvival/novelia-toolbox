@@ -1,0 +1,102 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: userscript-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - name: Verify version and main ancestry
+        run: |
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const version = JSON.parse(fs.readFileSync("package.json", "utf8")).version;
+            if (!/^\d+\.\d+\.\d+$/.test(version) || process.env.GITHUB_REF_NAME !== "v" + version) {
+              throw new Error("Tag must match package.json version (vX.Y.Z)");
+            }
+          '
+          git merge-base --is-ancestor HEAD origin/main
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm test
+      - run: npm run build
+      - name: Prepare sync branch and reject older versions
+        id: sync
+        run: |
+          set -euo pipefail
+          publish_path="$RUNNER_TEMP/userscript-publish"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git show-ref --verify --quiet refs/remotes/origin/release-dist; then
+            git fetch origin release-dist:refs/remotes/origin/release-dist
+            git worktree add -B release-dist "$publish_path" origin/release-dist
+            node --input-type=module -e '
+              import fs from "node:fs";
+              const current = JSON.parse(fs.readFileSync("package.json", "utf8")).version;
+              const previous = fs.readFileSync(process.argv[1], "utf8").match(/^\/\/\s*@version\s+(\S+)/m)?.[1];
+              if (!previous || !/^\d+\.\d+\.\d+$/.test(previous)) {
+                throw new Error("Cannot verify previously published version");
+              }
+              const left = current.split(".").map(BigInt);
+              const right = previous.split(".").map(BigInt);
+              const index = left.findIndex((part, i) => part !== right[i]);
+              if (index >= 0 && left[index] < right[index]) {
+                throw new Error("Refusing to publish an older version");
+              }
+              if (index < 0 && !fs.readFileSync("dist/novelia-toolbox.user.js").equals(fs.readFileSync(process.argv[2]))) {
+                throw new Error("Increase version before changing an already published script");
+              }
+            ' "$publish_path/novelia-toolbox.meta.js" "$publish_path/novelia-toolbox.user.js"
+          else
+            git worktree add --detach "$publish_path" HEAD
+            git -C "$publish_path" switch --orphan release-dist
+          fi
+          (cd dist && sha256sum novelia-toolbox.user.js novelia-toolbox.meta.js > SHA256SUMS)
+          cp dist/novelia-toolbox.user.js dist/novelia-toolbox.meta.js dist/SHA256SUMS "$publish_path/"
+          git -C "$publish_path" add novelia-toolbox.user.js novelia-toolbox.meta.js SHA256SUMS
+          echo "path=$publish_path" >> "$GITHUB_OUTPUT"
+      - name: Publish complete release assets
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --draft --verify-tag --generate-notes
+          fi
+          if [ "$(gh release view "$tag" --json isDraft --jq .isDraft)" = true ]; then
+            gh release upload "$tag" dist/novelia-toolbox.user.js dist/novelia-toolbox.meta.js dist/SHA256SUMS --clobber
+            gh release edit "$tag" --draft=false
+          else
+            recovered="$(mktemp -d)"
+            gh release download "$tag" --pattern novelia-toolbox.user.js --pattern novelia-toolbox.meta.js --pattern SHA256SUMS --dir "$recovered"
+            cmp dist/novelia-toolbox.user.js "$recovered/novelia-toolbox.user.js"
+            cmp dist/novelia-toolbox.meta.js "$recovered/novelia-toolbox.meta.js"
+            cmp dist/SHA256SUMS "$recovered/SHA256SUMS"
+          fi
+      - name: Update Greasy Fork sync branch
+        env:
+          PUBLISH_PATH: ${{ steps.sync.outputs.path }}
+        run: |
+          set -euo pipefail
+          if ! git -C "$PUBLISH_PATH" diff --cached --quiet; then
+            git -C "$PUBLISH_PATH" commit -m "Publish $GITHUB_REF_NAME"
+            git -C "$PUBLISH_PATH" push origin HEAD:release-dist
+          fi
