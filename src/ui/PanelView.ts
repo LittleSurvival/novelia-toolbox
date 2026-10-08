@@ -27,6 +27,7 @@ export class PanelView {
 
     mount(): void {
         this.panel.id = 'ntr-panel';
+        this.panel.dataset.ntrRoot = '';
         this.panel.setAttribute('aria-label', 'NTR ToolBox');
         const position = this.settings.getPosition();
         if (position) {
@@ -98,6 +99,7 @@ export class PanelView {
     }
 
     updateVisibility(): void {
+        this.form?.refreshVisibility();
         for (const module of this.registry.modules) {
             const row = this.rows.get(module.id);
             if (row) {

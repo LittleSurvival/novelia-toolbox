@@ -6,4 +6,7 @@ export interface SettingDefinition {
     value: SettingValue;
     options?: string[];
     min?: number;
+    label?: string;
+    description?: string;
+    visible?: (settings: readonly SettingDefinition[], pathname: string) => boolean;
 }

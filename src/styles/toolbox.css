@@ -99,6 +99,10 @@
 #ntr-panel .ntr-setting-row > span {
     overflow-wrap: anywhere;
 }
+#ntr-panel .ntr-setting-row > small {
+    grid-column: 1 / -1;
+    color: #aaa;
+}
 #ntr-panel .ntr-setting-row input:not([type='checkbox']),
 #ntr-panel .ntr-setting-row select {
     width: 100%;

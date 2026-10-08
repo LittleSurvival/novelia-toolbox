@@ -1,4 +1,3 @@
-import { version } from '../package.json';
 import { ToolboxApp } from './core/ToolboxApp';
 import { ModuleRegistry } from './core/ModuleRegistry';
 import { ModuleRunner } from './core/ModuleRunner';
@@ -17,7 +16,7 @@ import { QueueSakuraModule } from './modules/QueueSakuraModule';
 import { QueueGPTModule } from './modules/QueueGPTModule';
 import { AutoRetryModule } from './modules/AutoRetryModule';
 import { NotificationView } from './ui/NotificationView';
-import { PanelView } from './ui/PanelView';
+import { PageView } from './ui/PageView';
 import { KeyboardBindings } from './ui/KeyboardBindings';
 import { allowedHost } from './util/routes';
 import type { RuntimeWindow } from './types/RuntimeWindow';
@@ -43,7 +42,7 @@ if (allowedHost(location.hostname) && !runtime._NTRToolBoxInstance) {
     ]);
     const notifications = new NotificationView();
     const runner = new ModuleRunner(registry, settings, notifications);
-    const panel = new PanelView(registry, runner, settings, notifications, version);
+    const panel = new PageView(registry, runner, settings, notifications, site);
     const keyboard = new KeyboardBindings(registry, runner);
     const app = new ToolboxApp(
         registry,

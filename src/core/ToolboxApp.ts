@@ -2,7 +2,7 @@ import { ModuleRegistry } from './ModuleRegistry';
 import { ModuleRunner } from './ModuleRunner';
 import { SettingsService } from '../services/SettingsService';
 import { WorkspaceService } from '../services/WorkspaceService';
-import { PanelView } from '../ui/PanelView';
+import type { ToolboxView } from '../interfaces/ToolboxView';
 import { KeyboardBindings } from '../ui/KeyboardBindings';
 import { NotificationView } from '../ui/NotificationView';
 import { workspaceKind } from '../util/routes';
@@ -18,7 +18,7 @@ export class ToolboxApp {
         private readonly runner: ModuleRunner,
         private readonly settings: SettingsService,
         private readonly workspace: WorkspaceService,
-        private readonly panel: PanelView,
+        private readonly panel: ToolboxView,
         private readonly keyboard: KeyboardBindings,
         private readonly notifications: NotificationView,
     ) {}

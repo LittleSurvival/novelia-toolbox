@@ -31,7 +31,7 @@ export class AutoRetryModule implements ToolboxModule {
         if (
             event.isTrusted &&
             element?.closest('button') &&
-            !element.closest('#ntr-panel')
+            !element.closest('[data-ntr-root]')
         ) {
             this.attempts = 0;
             this.nextRun = 0;
