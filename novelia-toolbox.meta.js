@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NTR ToolBox
 // @namespace    http://tampermonkey.net/
-// @version      0.7.1
+// @version      1.0.0
 // @author       TheNano
 // @description  ToolBox for Novel Translate bot website
 // @license      MIT

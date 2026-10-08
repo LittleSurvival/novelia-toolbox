@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NTR ToolBox
 // @namespace    http://tampermonkey.net/
-// @version      0.7.1
+// @version      1.0.0
 // @author       TheNano
 // @description  ToolBox for Novel Translate bot website
 // @license      MIT
@@ -53,7 +53,6 @@ SOFTWARE.
 			document.head.append(style);
 		})(t);
 	};
-	var version = "0.7.1";
 	var ModuleRegistry = class {
 		modules;
 		constructor(modules) {
@@ -506,331 +505,6 @@ SOFTWARE.
 			});
 		}
 	};
-	var SettingsForm = class {
-		onSave;
-		notifications;
-		lifetime = new AbortController();
-		pendingSetting = null;
-		pendingButton = null;
-		captureKey = (event) => {
-			if (!this.pendingSetting || event.isComposing || [
-				"Control",
-				"Alt",
-				"Shift",
-				"Meta"
-			].includes(event.key)) return;
-			event.preventDefault();
-			event.stopImmediatePropagation();
-			this.pendingSetting.value = event.key === "Escape" ? "none" : event.key.toLowerCase();
-			this.cancelCapture();
-			this.save();
-		};
-		constructor(onSave, notifications) {
-			this.onSave = onSave;
-			this.notifications = notifications;
-			document.addEventListener("keydown", this.captureKey, {
-				capture: true,
-				signal: this.lifetime.signal
-			});
-		}
-		render(settings) {
-			const form = document.createElement("div");
-			form.className = "ntr-settings-container";
-			form.hidden = true;
-			for (const setting of settings) {
-				const row = document.createElement("label");
-				row.className = "ntr-setting-row";
-				const caption = document.createElement("span");
-				caption.textContent = setting.name === "擷取單頁wenku數量(deving)" ? "擷取單頁文庫數量" : setting.name;
-				row.append(caption, this.input(setting));
-				form.append(row);
-			}
-			return form;
-		}
-		dispose() {
-			this.cancelCapture();
-			this.lifetime.abort();
-		}
-		input(setting) {
-			if (setting.name === "bind") {
-				const button = document.createElement("button");
-				button.type = "button";
-				button.textContent = this.bindLabel(setting);
-				button.addEventListener("click", () => {
-					this.cancelCapture();
-					this.pendingSetting = setting;
-					this.pendingButton = button;
-					button.textContent = "請按按鍵（Esc 清除）";
-				}, { signal: this.lifetime.signal });
-				return button;
-			}
-			if (setting.type === "select") {
-				const select = document.createElement("select");
-				for (const value of setting.options ?? []) {
-					const option = document.createElement("option");
-					option.value = value;
-					option.textContent = value;
-					select.append(option);
-				}
-				select.value = String(setting.value);
-				select.addEventListener("change", () => {
-					setting.value = select.value;
-					this.save();
-				}, { signal: this.lifetime.signal });
-				return select;
-			}
-			const input = document.createElement("input");
-			input.type = setting.type === "boolean" ? "checkbox" : setting.type === "number" ? "number" : setting.name === "Key" ? "password" : "text";
-			if (setting.type === "boolean") input.checked = setting.value === true;
-			else input.value = String(setting.value);
-			if (setting.type === "number") {
-				input.min = String(setting.min ?? 0);
-				input.step = "1";
-			}
-			const commitInput = (reportInvalid) => {
-				if (setting.type === "number") {
-					const value = input.valueAsNumber;
-					if (!Number.isSafeInteger(value) || value < (setting.min ?? 0)) {
-						if (reportInvalid) {
-							this.notifications.error(new Error(`${setting.name} 必須是大於等於 ${setting.min ?? 0} 的整數`));
-							input.value = String(setting.value);
-						}
-						return;
-					}
-					setting.value = value;
-				} else setting.value = setting.type === "boolean" ? input.checked : input.value;
-				this.save();
-			};
-			input.addEventListener("input", () => commitInput(false), { signal: this.lifetime.signal });
-			input.addEventListener("change", () => commitInput(true), { signal: this.lifetime.signal });
-			return input;
-		}
-		bindLabel(setting) {
-			return setting.value === "none" ? "(None)" : `[${String(setting.value).toUpperCase()}]`;
-		}
-		cancelCapture() {
-			if (this.pendingButton && this.pendingSetting) this.pendingButton.textContent = this.bindLabel(this.pendingSetting);
-			this.pendingButton = null;
-			this.pendingSetting = null;
-		}
-		save() {
-			try {
-				this.onSave();
-			} catch (error) {
-				this.notifications.error(error);
-			}
-		}
-	};
-	var DragHandler = class {
-		panel;
-		handle;
-		settings;
-		lifetime = new AbortController();
-		pointerId = null;
-		offsetX = 0;
-		offsetY = 0;
-		startX = 0;
-		startY = 0;
-		moved = false;
-		blockedUntil = 0;
-		layoutFrame = null;
-		constructor(panel, handle, settings) {
-			this.panel = panel;
-			this.handle = handle;
-			this.settings = settings;
-			const options = { signal: this.lifetime.signal };
-			handle.addEventListener("pointerdown", (event) => {
-				if (event.button !== 0 || event.target instanceof Element && event.target.closest("button")) return;
-				const rect = panel.getBoundingClientRect();
-				this.pointerId = event.pointerId;
-				this.offsetX = event.clientX - rect.left;
-				this.offsetY = event.clientY - rect.top;
-				this.startX = event.clientX;
-				this.startY = event.clientY;
-				this.moved = false;
-				handle.setPointerCapture(event.pointerId);
-			}, options);
-			handle.addEventListener("pointermove", (event) => {
-				if (event.pointerId !== this.pointerId) return;
-				this.moved ||= Math.abs(event.clientX - this.startX) + Math.abs(event.clientY - this.startY) > 5;
-				if (this.moved) {
-					panel.style.left = `${event.clientX - this.offsetX}px`;
-					panel.style.top = `${event.clientY - this.offsetY}px`;
-					this.clamp();
-				}
-			}, options);
-			handle.addEventListener("pointerup", (event) => {
-				if (event.pointerId !== this.pointerId) return;
-				this.pointerId = null;
-				if (this.moved) {
-					this.blockedUntil = Date.now() + 400;
-					this.settings.savePosition({
-						left: panel.style.left,
-						top: panel.style.top
-					});
-				}
-				if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
-			}, options);
-			handle.addEventListener("pointercancel", () => {
-				this.pointerId = null;
-			}, options);
-			window.addEventListener("resize", () => this.clamp(), options);
-			this.layoutFrame = requestAnimationFrame(() => {
-				this.layoutFrame = null;
-				if (!this.lifetime.signal.aborted) this.clamp();
-			});
-		}
-		clickAfterDrag() {
-			return Date.now() < this.blockedUntil;
-		}
-		clamp() {
-			const rect = this.panel.getBoundingClientRect();
-			if (rect.width <= 0 || rect.height <= 0 || getComputedStyle(this.panel).position !== "fixed") return;
-			const left = Math.min(Math.max(rect.left, 0), Math.max(0, window.innerWidth - rect.width));
-			const top = Math.min(Math.max(rect.top, 0), Math.max(0, window.innerHeight - rect.height));
-			this.panel.style.left = `${left}px`;
-			this.panel.style.top = `${top}px`;
-		}
-		dispose() {
-			if (this.layoutFrame !== null) cancelAnimationFrame(this.layoutFrame);
-			if (this.pointerId !== null && this.handle.hasPointerCapture(this.pointerId)) this.handle.releasePointerCapture(this.pointerId);
-			this.pointerId = null;
-			this.lifetime.abort();
-		}
-	};
-	var PanelView = class {
-		registry;
-		runner;
-		settings;
-		notifications;
-		version;
-		panel = document.createElement("div");
-		lifetime = new AbortController();
-		rows = new Map();
-		buttons = new Map();
-		form = null;
-		drag = null;
-		unsubscribe = null;
-		minimized = false;
-		constructor(registry, runner, settings, notifications, version) {
-			this.registry = registry;
-			this.runner = runner;
-			this.settings = settings;
-			this.notifications = notifications;
-			this.version = version;
-		}
-		mount() {
-			this.panel.id = "ntr-panel";
-			this.panel.setAttribute("aria-label", "NTR ToolBox");
-			const position = this.settings.getPosition();
-			if (position) {
-				this.panel.style.left = position.left;
-				this.panel.style.top = position.top;
-			}
-			const title = document.createElement("div");
-			title.className = "ntr-titlebar";
-			const text = document.createElement("span");
-			text.textContent = `NTR ToolBox v${this.version}`;
-			const toggle = document.createElement("button");
-			toggle.type = "button";
-			toggle.textContent = "−";
-			toggle.setAttribute("aria-label", "縮小工具箱");
-			title.append(text, toggle);
-			const body = document.createElement("div");
-			body.className = "ntr-panel-body";
-			this.form = new SettingsForm(() => this.settings.save(this.registry.modules), this.notifications);
-			this.registry.modules.forEach((module) => this.addModule(body, module));
-			const info = document.createElement("div");
-			info.className = "ntr-info";
-			const mobile = /Mobi|Android/i.test(navigator.userAgent) || matchMedia("(pointer: coarse)").matches;
-			info.textContent = `${mobile ? "點擊執行／⚙設定" : "左鍵執行／右鍵設定"} · TheNano`;
-			this.panel.append(title, body, info);
-			document.body.append(this.panel);
-			this.drag = new DragHandler(this.panel, title, this.settings);
-			const minimize = () => {
-				if (this.drag?.clickAfterDrag()) return;
-				this.minimized = !this.minimized;
-				body.hidden = this.minimized;
-				info.hidden = this.minimized;
-				toggle.textContent = this.minimized ? "+" : "−";
-				toggle.setAttribute("aria-label", this.minimized ? "展開工具箱" : "縮小工具箱");
-				this.panel.classList.toggle("minimized", this.minimized);
-				this.drag?.clamp();
-			};
-			title.addEventListener("click", (event) => {
-				if (mobile || event.target instanceof Element && event.target.closest("button")) minimize();
-			}, { signal: this.lifetime.signal });
-			title.addEventListener("contextmenu", (event) => {
-				event.preventDefault();
-				minimize();
-			}, { signal: this.lifetime.signal });
-			this.unsubscribe = this.runner.subscribe((module) => this.updateState(module));
-			this.updateVisibility();
-		}
-		updateVisibility() {
-			for (const module of this.registry.modules) {
-				const row = this.rows.get(module.id);
-				if (row) row.hidden = !module.supports(location.pathname);
-				this.updateState(module);
-			}
-			this.drag?.clamp();
-		}
-		dispose() {
-			this.unsubscribe?.();
-			this.lifetime.abort();
-			this.form?.dispose();
-			this.drag?.dispose();
-			this.rows.clear();
-			this.buttons.clear();
-			this.panel.remove();
-		}
-		addModule(body, module) {
-			const row = document.createElement("div");
-			row.className = "ntr-module-container";
-			const header = document.createElement("div");
-			header.className = "ntr-module-header";
-			const execute = document.createElement("button");
-			execute.type = "button";
-			execute.textContent = module.name;
-			execute.className = "ntr-module-action";
-			execute.addEventListener("click", () => this.runner.activate(module), { signal: this.lifetime.signal });
-			const configuration = document.createElement("button");
-			configuration.type = "button";
-			configuration.textContent = "⚙";
-			configuration.setAttribute("aria-label", `${module.name} 設定`);
-			configuration.setAttribute("aria-expanded", "false");
-			const form = this.form?.render(module.settings);
-			const showSettings = () => {
-				if (form) {
-					form.hidden = !form.hidden;
-					configuration.setAttribute("aria-expanded", String(!form.hidden));
-				}
-				this.drag?.clamp();
-			};
-			configuration.addEventListener("click", showSettings, { signal: this.lifetime.signal });
-			header.addEventListener("contextmenu", (event) => {
-				event.preventDefault();
-				showSettings();
-			}, { signal: this.lifetime.signal });
-			header.append(execute, configuration);
-			row.append(header);
-			if (form) row.append(form);
-			body.append(row);
-			this.rows.set(module.id, row);
-			this.buttons.set(module.id, execute);
-		}
-		updateState(module) {
-			const button = this.buttons.get(module.id);
-			if (!button) return;
-			const active = this.runner.isEnabled(module);
-			const busy = this.runner.isRunning(module);
-			button.classList.toggle("active", active);
-			button.disabled = module.kind === "command" && busy;
-			button.setAttribute("aria-busy", String(busy));
-			if (module.kind === "continuous") button.setAttribute("aria-pressed", String(active));
-			button.textContent = `${module.name}${busy ? " …" : module.kind === "continuous" ? active ? " ⇋" : " ⏸" : " ▶"}`;
-		}
-	};
 	function typingEvent(event) {
 		return event.composedPath().some((target) => target instanceof Element && (target.matches("input, textarea, select, [role=\"textbox\"]") || target instanceof HTMLElement && target.isContentEditable || Boolean(target.closest("[contenteditable]:not([contenteditable=\"false\"])"))));
 	}
@@ -991,6 +665,46 @@ SOFTWARE.
 		return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : fallback;
 	}
 	var SiteAdapter = class {
+		toolboxMountPoint() {
+			const page = pageKind(location.pathname);
+			if (page === "other") return null;
+			if (page === "novel" || page === "wenku") {
+				const content = document.querySelector(".layout-content, main");
+				if (!content?.querySelector("h1, h2, h3")) return null;
+				const parent = page === "novel" ? content.querySelector(".metadata-stat")?.parentElement : content;
+				if (!parent) return null;
+				const children = [...parent.children].filter((element) => !element.hasAttribute("data-ntr-root"));
+				if (page === "novel") {
+					const comments = [...parent.querySelectorAll("h2, h3")].find((heading) => ["评论", "評論"].includes(heading.textContent?.trim() ?? ""));
+					const commentSection = comments && children.find((element) => element.contains(comments));
+					if (commentSection) return {
+						parent,
+						before: commentSection
+					};
+					const workspace = children.find((element) => [...element.querySelectorAll("button")].some((button) => ["导入工作区", "導入工作區"].includes(button.textContent?.trim() ?? "")));
+					return workspace ? {
+						parent,
+						before: children[children.indexOf(workspace) + 1] ?? null
+					} : null;
+				}
+				return {
+					parent,
+					before: children[0] ?? null
+				};
+			}
+			const heading = document.querySelector(".layout-content h1, main h1");
+			const parent = heading?.parentElement;
+			if (!parent) return null;
+			const children = [...parent.children].filter((element) => !element.hasAttribute("data-ntr-root"));
+			if (page === "workspace") return {
+				parent,
+				before: children.find((element) => element.matches("h2") || element.querySelector("h2")) ?? children[children.indexOf(heading) + 1] ?? null
+			};
+			return {
+				parent,
+				before: children.find((element) => element.matches(".n-pagination")) ?? children.find((element) => element.matches("ul, [role=\"list\"]")) ?? null
+			};
+		}
 		wenkuIds(limit) {
 			const ids = [...document.querySelectorAll("a[href^=\"/wenku/\"]")].map((link) => new URL(link.href).pathname.split("/")[2]).filter((id) => Boolean(id));
 			return [...new Set(ids)].slice(0, limit);
@@ -1025,7 +739,7 @@ SOFTWARE.
 			return parseRecord(localStorage.getItem("setting"))?.favoriteCreateTimeFirst === true;
 		}
 		buttons(...labels) {
-			return [...document.querySelectorAll("button")].filter((button) => !button.disabled && !button.closest("#ntr-panel") && Boolean(button.closest(".n-list-item .n-thing")) && labels.some((label) => button.textContent?.trim() === label));
+			return [...document.querySelectorAll("button")].filter((button) => !button.disabled && !button.closest("[data-ntr-root]") && Boolean(button.closest(".n-list-item .n-thing")) && labels.some((label) => button.textContent?.trim() === label));
 		}
 	};
 	var TranslatorService = class {
@@ -1432,21 +1146,67 @@ SOFTWARE.
 		dispose() {}
 	};
 	function queueSettings() {
+		const isWeb = (pathname) => [
+			"novel",
+			"novels",
+			"favorite-web"
+		].includes(pageKind(pathname));
+		const splitIs = (settings, value) => settings.find((setting) => setting.name === "分段")?.value === value;
 		return [
-			numberSetting("單次擷取web數量(可破限)", 20, 1),
-			numberSetting("擷取單頁wenku數量(deving)", 20, 1),
-			selectSetting("模式", [
-				"常規",
-				"過期",
-				"重翻"
-			], "常規"),
-			selectSetting("分段", ["智能", "固定"], "智能"),
-			numberSetting("智能均分任務上限", 1e3, 1),
-			numberSetting("智能均分章節下限", 5, 1),
-			numberSetting("固定均分任務", 6, 1),
-			booleanSetting("R18(需登入)", true),
-			booleanSetting("使用瀏覽器爬蟲", false),
-			stringSetting("bind", "none")
+			{
+				...numberSetting("單次擷取web數量(可破限)", 20, 1),
+				label: "擷取數量（本）",
+				description: "可超過網站單頁顯示數量",
+				visible: (_, pathname) => pageKind(pathname) === "novels"
+			},
+			{
+				...numberSetting("擷取單頁wenku數量(deving)", 20, 1),
+				visible: (_, pathname) => pageKind(pathname) === "wenkus"
+			},
+			{
+				...selectSetting("模式", [
+					"常規",
+					"過期",
+					"重翻"
+				], "常規"),
+				label: "翻譯模式"
+			},
+			{
+				...selectSetting("分段", ["智能", "固定"], "智能"),
+				label: "任務分段",
+				visible: (_, pathname) => isWeb(pathname)
+			},
+			{
+				...numberSetting("智能均分任務上限", 1e3, 1),
+				label: "任務上限",
+				visible: (settings, pathname) => isWeb(pathname) && splitIs(settings, "智能")
+			},
+			{
+				...numberSetting("智能均分章節下限", 5, 1),
+				label: "每個任務至少（章）",
+				visible: (settings, pathname) => isWeb(pathname) && splitIs(settings, "智能")
+			},
+			{
+				...numberSetting("固定均分任務", 6, 1),
+				label: "均分任務數",
+				visible: (settings, pathname) => isWeb(pathname) && splitIs(settings, "固定")
+			},
+			{
+				...booleanSetting("R18(需登入)", true),
+				label: "使用登入權限（含 R18）"
+			},
+			{
+				...booleanSetting("使用瀏覽器爬蟲", false),
+				visible: (_, pathname) => [
+					"wenku",
+					"wenkus",
+					"favorite-wenku"
+				].includes(pageKind(pathname))
+			},
+			{
+				...stringSetting("bind", "none"),
+				label: "快捷鍵"
+			}
 		];
 	}
 	function readQueueOptions(settings) {
@@ -1514,7 +1274,7 @@ SOFTWARE.
 		listening = false;
 		onManualClick = (event) => {
 			const element = event.target instanceof Element ? event.target : null;
-			if (event.isTrusted && element?.closest("button") && !element.closest("#ntr-panel")) {
+			if (event.isTrusted && element?.closest("button") && !element.closest("[data-ntr-root]")) {
 				this.attempts = 0;
 				this.nextRun = 0;
 			}
@@ -1558,7 +1318,503 @@ SOFTWARE.
 			this.nextRun = 0;
 		}
 	};
-	_css("#ntr-panel{z-index:9999;box-sizing:border-box;color:#ddd;background:#1e1e1e;border:1px solid #444;border-radius:8px;width:340px;max-width:calc(100vw - 24px);padding:8px;font:14px/1.5 Arial,sans-serif;position:fixed;top:70px;left:20px;box-shadow:0 3px 14px #0005}#ntr-panel [hidden]{display:none!important}#ntr-panel button,#ntr-panel input,#ntr-panel select{font:inherit;box-sizing:border-box}#ntr-panel button,#ntr-panel input:not([type=checkbox]),#ntr-panel select{color:#eee;background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:4px 6px}#ntr-panel button{cursor:pointer}#ntr-panel button:disabled{opacity:.65;cursor:progress}#ntr-panel button:focus-visible,#ntr-panel input:focus-visible,#ntr-panel select:focus-visible{outline:2px solid #63e2b7}#ntr-panel.minimized{width:230px}#ntr-panel .ntr-titlebar{cursor:move;-webkit-user-select:none;user-select:none;touch-action:none;background:#292929;border-radius:4px;justify-content:space-between;align-items:center;gap:8px;padding:8px;font-weight:700;display:flex}#ntr-panel .ntr-panel-body{max-height:calc(100dvh - 150px);margin-top:8px;overflow-y:auto}#ntr-panel .ntr-module-container{border:1px solid #444;border-radius:4px;margin-bottom:8px}#ntr-panel .ntr-module-header{background:#2e2e2e;gap:4px;padding:4px;display:flex}#ntr-panel .ntr-module-action{text-align:left;flex:1}#ntr-panel .ntr-module-action.active{color:#111;background:#63e2b7}#ntr-panel .ntr-settings-container{padding:8px}#ntr-panel .ntr-setting-row{grid-template-columns:minmax(0,1fr) 120px;align-items:center;gap:8px;margin:6px 0;display:grid}#ntr-panel .ntr-setting-row>span{overflow-wrap:anywhere}#ntr-panel .ntr-setting-row input:not([type=checkbox]),#ntr-panel .ntr-setting-row select{width:100%;min-width:0}#ntr-panel .ntr-info{color:#aaa;padding-top:4px;font-size:11px}.ntr-notification-container{z-index:10000;pointer-events:none;width:min(500px,100vw - 24px);position:fixed;top:16px;left:50%;transform:translate(-50%)}.ntr-notification-message{color:#eee;overflow-wrap:anywhere;background:#292929;border:1px solid #666;border-radius:6px;margin-bottom:8px;padding:10px 14px;font:14px/1.5 Arial,sans-serif;box-shadow:0 3px 14px #0005}.ntr-notification-message.failed{border-color:#d66}.ntr-notification-message.partial{border-color:#ca5}@media (pointer:coarse){#ntr-panel button{min-height:36px}#ntr-panel .ntr-setting-row{grid-template-columns:minmax(0,1fr) 110px}}");
+	var SettingsForm = class {
+		onSave;
+		notifications;
+		selectStyle;
+		lifetime = new AbortController();
+		pendingSetting = null;
+		pendingButton = null;
+		fields = [];
+		captureKey = (event) => {
+			if (!this.pendingSetting || event.isComposing || [
+				"Control",
+				"Alt",
+				"Shift",
+				"Meta"
+			].includes(event.key)) return;
+			event.preventDefault();
+			event.stopImmediatePropagation();
+			this.pendingSetting.value = event.key === "Escape" ? "none" : event.key.toLowerCase();
+			this.cancelCapture();
+			this.save();
+		};
+		constructor(onSave, notifications, selectStyle = "native") {
+			this.onSave = onSave;
+			this.notifications = notifications;
+			this.selectStyle = selectStyle;
+			document.addEventListener("keydown", this.captureKey, {
+				capture: true,
+				signal: this.lifetime.signal
+			});
+		}
+		render(settings) {
+			const form = document.createElement("div");
+			form.className = "ntr-settings-container";
+			form.hidden = true;
+			for (const setting of settings) {
+				const row = document.createElement(setting.type === "select" && this.selectStyle === "segments" ? "div" : "label");
+				row.className = "ntr-setting-row";
+				row.dataset.setting = setting.name;
+				row.dataset.type = setting.type;
+				const caption = document.createElement("span");
+				caption.textContent = setting.label ?? (setting.name === "bind" ? "快捷鍵" : setting.name === "擷取單頁wenku數量(deving)" ? "擷取單頁文庫數量" : setting.name);
+				row.append(caption, this.input(setting));
+				if (setting.description) {
+					const description = document.createElement("small");
+					description.textContent = setting.description;
+					row.append(description);
+				}
+				form.append(row);
+				this.fields.push({
+					setting,
+					settings,
+					row
+				});
+			}
+			this.refreshVisibility();
+			return form;
+		}
+		refreshVisibility() {
+			for (const { setting, settings, row } of this.fields) {
+				row.hidden = setting.visible?.(settings, location.pathname) === false;
+				if (row.hidden && this.pendingSetting === setting) this.cancelCapture();
+			}
+		}
+		dispose() {
+			this.cancelCapture();
+			this.lifetime.abort();
+			this.fields.length = 0;
+		}
+		input(setting) {
+			if (setting.name === "bind") {
+				const button = document.createElement("button");
+				button.type = "button";
+				button.textContent = this.bindLabel(setting);
+				button.addEventListener("click", () => {
+					this.cancelCapture();
+					this.pendingSetting = setting;
+					this.pendingButton = button;
+					button.textContent = "請按按鍵（Esc 清除）";
+				}, { signal: this.lifetime.signal });
+				return button;
+			}
+			if (setting.type === "select") {
+				if (this.selectStyle === "segments") return this.enumButtons(setting);
+				const select = document.createElement("select");
+				for (const value of setting.options ?? []) {
+					const option = document.createElement("option");
+					option.value = value;
+					option.textContent = value;
+					select.append(option);
+				}
+				select.value = String(setting.value);
+				select.addEventListener("change", () => {
+					setting.value = select.value;
+					this.save();
+				}, { signal: this.lifetime.signal });
+				return select;
+			}
+			const input = document.createElement("input");
+			input.type = setting.type === "boolean" ? "checkbox" : setting.type === "number" ? "number" : setting.name === "Key" ? "password" : "text";
+			if (setting.type === "boolean") input.checked = setting.value === true;
+			else input.value = String(setting.value);
+			if (setting.type === "number") {
+				input.min = String(setting.min ?? 0);
+				input.step = "1";
+				input.required = true;
+			}
+			const commitInput = (reportInvalid) => {
+				if (setting.type === "number") {
+					const value = input.valueAsNumber;
+					if (!Number.isSafeInteger(value) || value < (setting.min ?? 0)) {
+						if (reportInvalid) {
+							this.notifications.error(new Error(`${setting.name} 必須是大於等於 ${setting.min ?? 0} 的整數`));
+							input.value = String(setting.value);
+						}
+						return;
+					}
+					setting.value = value;
+				} else setting.value = setting.type === "boolean" ? input.checked : input.value;
+				this.save();
+			};
+			input.addEventListener("input", () => commitInput(false), { signal: this.lifetime.signal });
+			input.addEventListener("change", () => commitInput(true), { signal: this.lifetime.signal });
+			return input;
+		}
+		enumButtons(setting) {
+			const group = document.createElement("div");
+			group.className = "ntr-enum";
+			group.setAttribute("role", "radiogroup");
+			group.setAttribute("aria-label", setting.label ?? setting.name);
+			const options = setting.options ?? [];
+			group.style.setProperty("--enum-count", String(options.length));
+			const buttons = [];
+			const update = () => {
+				const selected = options.indexOf(String(setting.value));
+				group.style.setProperty("--enum-index", String(Math.max(0, selected)));
+				buttons.forEach((button, index) => {
+					button.setAttribute("aria-checked", String(index === selected));
+					button.tabIndex = index === selected ? 0 : -1;
+				});
+			};
+			const select = (index) => {
+				setting.value = options[index];
+				update();
+				this.save();
+			};
+			options.forEach((value, index) => {
+				const button = document.createElement("button");
+				button.type = "button";
+				button.textContent = value;
+				button.setAttribute("role", "radio");
+				button.addEventListener("click", () => select(index), { signal: this.lifetime.signal });
+				button.addEventListener("keydown", (event) => {
+					let next;
+					switch (event.key) {
+						case "ArrowRight":
+						case "ArrowDown":
+							next = (index + 1) % options.length;
+							break;
+						case "ArrowLeft":
+						case "ArrowUp":
+							next = (index + options.length - 1) % options.length;
+							break;
+						case "Home":
+							next = 0;
+							break;
+						case "End":
+							next = options.length - 1;
+							break;
+						default: return;
+					}
+					event.preventDefault();
+					select(next);
+					buttons[next].focus();
+				}, { signal: this.lifetime.signal });
+				buttons.push(button);
+				group.append(button);
+			});
+			update();
+			return group;
+		}
+		bindLabel(setting) {
+			return setting.value === "none" ? "(None)" : `[${String(setting.value).toUpperCase()}]`;
+		}
+		cancelCapture() {
+			if (this.pendingButton && this.pendingSetting) this.pendingButton.textContent = this.bindLabel(this.pendingSetting);
+			this.pendingButton = null;
+			this.pendingSetting = null;
+		}
+		save() {
+			this.refreshVisibility();
+			try {
+				this.onSave();
+			} catch (error) {
+				this.notifications.error(error);
+			}
+		}
+	};
+	var web_novel_default = ":host{--queue-bg:var(--n-color,#fff);--queue-text:var(--n-text-color,#333639);--queue-muted:#72777d;--queue-line:#e5e7e9;--queue-green:#188759;--queue-on-green:#fff;--queue-tint:#f1f8f4;--queue-field:#fff;--queue-error:#a32828;--queue-error-bg:#fff6f4;--queue-warning:#815900;--queue-warning-bg:#fffaee;color:var(--queue-text);margin:16px 0 4px;font:13px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,Microsoft JhengHei,sans-serif;display:block;container-type:inline-size}:host([data-theme=dark]){--queue-bg:var(--n-color,#101014);--queue-text:var(--n-text-color,#dedee4);--queue-muted:#a1a1aa;--queue-line:#303038;--queue-green:#63e2b7;--queue-on-green:#10281f;--queue-tint:#172720;--queue-field:#242428;--queue-error:#ffada6;--queue-error-bg:#301e1e;--queue-warning:#efd288;--queue-warning-bg:#2d281a}*{box-sizing:border-box}[hidden]{display:none!important}.toolbar{border:1px solid var(--queue-line);background:var(--queue-bg);border-radius:4px}.bar{align-items:center;gap:10px;min-height:46px;padding:7px 10px;display:flex}.title{white-space:nowrap;align-items:center;gap:7px;font-weight:500;display:flex}.badge{color:var(--queue-green);border:1px solid color-mix(in srgb, var(--queue-green) 30%, transparent);border-radius:3px;padding:0 4px;font-size:10px;font-weight:500}button,input,select{font:inherit;color:inherit}button{cursor:pointer;border:1px solid var(--queue-line);white-space:nowrap;background:0 0;border-radius:3px;min-height:32px;padding:5px 10px}button:hover{border-color:var(--queue-green)}button:disabled{opacity:.6;cursor:progress}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--queue-green);outline-offset:2px}.engines{border:1px solid var(--queue-line);background:var(--queue-field);border-radius:3px;flex-shrink:0;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px;padding:2px;display:grid;position:relative}.engines:before{content:\"\";background:var(--queue-tint);width:calc(50% - 3px);box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--queue-green) 30%, transparent);pointer-events:none;border-radius:2px;transition:transform .24s cubic-bezier(.2,0,0,1);position:absolute;inset:2px auto 2px 2px}:host([data-engine=gpt]) .engines:before{transform:translate(calc(100% + 2px))}.engines button{min-height:26px;color:var(--queue-muted);border:0;padding:3px 9px;font-size:12px;transition:color .18s;position:relative}.engines button:hover{color:var(--queue-text)}.engines button[aria-pressed=true]{color:var(--queue-green)}.summary{color:var(--queue-muted);white-space:nowrap;margin-right:auto;font-size:11px}.settings-toggle{justify-content:center;align-items:center;gap:4px;margin-left:auto;display:inline-flex}.chevron{transform-origin:50%;flex:0 0 1em;width:1em;height:1em;transition:transform .22s;display:block}.settings-toggle[aria-expanded=true]{color:var(--queue-green)}.settings-toggle[aria-expanded=true] .chevron{transform:rotate(180deg)}.primary{background:var(--queue-green);border-color:var(--queue-green);color:var(--queue-on-green)}.disclosure{grid-template-rows:0fr;transition:grid-template-rows .22s cubic-bezier(.2,0,0,1);display:grid}.disclosure.expanded{grid-template-rows:1fr}.disclosure-inner{min-height:0;overflow:hidden}.settings-content{border-top:1px solid var(--queue-line);padding:13px 14px 10px}.ntr-settings-container{grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 16px;display:grid}.ntr-setting-row{flex-direction:column;gap:5px;min-width:0;font-size:12px;display:flex}.ntr-setting-row small{color:var(--queue-muted);font-size:11px}.ntr-setting-row input:not([type=checkbox]),.ntr-setting-row select,.ntr-setting-row>button{border:1px solid var(--queue-line);background:var(--queue-field);border-radius:3px;width:100%;min-width:0;min-height:32px;padding:5px 8px}.ntr-enum{grid-template-columns:repeat(var(--enum-count), minmax(0, 1fr));border:1px solid var(--queue-line);background:var(--queue-field);border-radius:3px;padding:2px;display:grid;position:relative}.ntr-enum:before{content:\"\";width:calc((100% - 4px) / var(--enum-count));background:var(--queue-tint);box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--queue-green) 30%, transparent);transform:translateX(calc(var(--enum-index) * 100%));pointer-events:none;border-radius:2px;transition:transform .24s cubic-bezier(.2,0,0,1);position:absolute;inset:2px auto 2px 2px}.ntr-enum button{min-width:0;min-height:26px;color:var(--queue-muted);border:0;padding:3px 4px;transition:color .18s;position:relative}.ntr-enum button:hover{color:var(--queue-text)}.ntr-enum button[aria-checked=true],.ntr-enum button[aria-pressed=true]{color:var(--queue-green)}.module-tabs{flex:1;max-width:440px}.module-tabs button[data-enabled=true]:after{content:\" ●\";color:var(--queue-green);font-size:9px}.primary.danger{color:var(--queue-error);border-color:var(--queue-error);background:var(--queue-error-bg)}.ntr-setting-row[data-type=boolean]{flex-direction:row-reverse;justify-content:flex-end;align-self:end;align-items:center;min-height:32px}.ntr-setting-row input[type=checkbox]{accent-color:var(--queue-green);width:16px;height:16px;margin:0 3px 0 0}.settings-note{color:var(--queue-muted);margin-top:12px;font-size:11px}.feedback{border-top:1px solid var(--queue-line);color:var(--queue-green);background:var(--queue-tint);overflow-wrap:anywhere;padding:9px 13px;font-size:12px}.feedback[data-status=failed]{color:var(--queue-error);background:var(--queue-error-bg)}.feedback[data-status=partial]{color:var(--queue-warning);background:var(--queue-warning-bg)}@container (width<=660px){:host([data-workspace=true]) .bar{flex-wrap:wrap}.module-tabs{flex-basis:100%;order:1;max-width:none}.summary{display:none}.bar{gap:8px}}@container (width<=480px){.title>span:first-child{display:none}.bar{gap:6px;padding:7px 8px}.ntr-settings-container{grid-template-columns:repeat(2,minmax(0,1fr))}}@container (width<=300px){.title{display:none}.bar{flex-wrap:wrap}.engines button{padding-inline:6px}button{padding-inline:7px}.ntr-settings-container{grid-template-columns:minmax(0,1fr)}}@media (pointer:coarse){.bar{flex-wrap:wrap}button,.engines button,.ntr-enum button{min-height:40px}.ntr-setting-row input:not([type=checkbox]),.ntr-setting-row select{min-height:40px;font-size:16px}}@media (prefers-reduced-motion:reduce){.engines:before,.engines button,.ntr-enum:before,.ntr-enum button,.disclosure,.chevron{transition:none}}";
+	var EmbeddedToolboxView = class {
+		registry;
+		runner;
+		settings;
+		notifications;
+		site;
+		host = document.createElement("div");
+		shadow = this.host.attachShadow({ mode: "open" });
+		lifetime = new AbortController();
+		forms = new Map();
+		formElements = new Map();
+		engines = new Map();
+		choices = document.createElement("div");
+		note = document.createElement("div");
+		modules = [];
+		toggle = document.createElement("button");
+		execute = document.createElement("button");
+		disclosure = document.createElement("div");
+		summary = document.createElement("span");
+		feedback = document.createElement("div");
+		layoutObserver = new MutationObserver((records) => {
+			if (!this.host.isConnected || records.some((record) => record.target === this.parent && [...record.addedNodes, ...record.removedNodes].some((node) => node !== this.host))) this.schedulePlacement();
+		});
+		themeObserver = new MutationObserver(() => this.syncTheme());
+		selected = "queue-sakura";
+		expanded = false;
+		parent = null;
+		before = null;
+		frame = null;
+		unsubscribe = null;
+		generation = 0;
+		constructor(registry, runner, settings, notifications, site) {
+			this.registry = registry;
+			this.runner = runner;
+			this.settings = settings;
+			this.notifications = notifications;
+			this.site = site;
+		}
+		mount() {
+			this.modules = this.registry.modules.filter((module) => module.supports(location.pathname));
+			if (!this.modules.length) return;
+			this.selected = this.modules[0].id;
+			this.host.id = "ntr-web-novel";
+			this.host.dataset.ntrRoot = "";
+			this.host.dataset.workspace = String(pageKind(location.pathname) === "workspace");
+			const style = document.createElement("style");
+			style.textContent = web_novel_default;
+			const toolbar = document.createElement("section");
+			toolbar.className = "toolbar";
+			toolbar.setAttribute("aria-label", this.isQueue() ? "批量排隊" : "工作區工具");
+			const bar = document.createElement("div");
+			bar.className = "bar";
+			const title = document.createElement("div");
+			title.className = "title";
+			const titleText = document.createElement("span");
+			titleText.textContent = this.isQueue() ? "批量排隊" : "工作區工具";
+			const badge = document.createElement("span");
+			badge.className = "badge";
+			badge.textContent = "NTR";
+			title.append(titleText, badge);
+			const engines = this.choices;
+			engines.className = this.isQueue() ? "engines" : "ntr-enum module-tabs";
+			engines.style.setProperty("--enum-count", String(this.modules.length));
+			engines.setAttribute("role", "group");
+			engines.setAttribute("aria-label", this.isQueue() ? "目標翻譯器" : "工具功能");
+			for (const { id: kind } of this.modules) {
+				const button = document.createElement("button");
+				button.type = "button";
+				button.textContent = this.engineName(kind);
+				button.addEventListener("click", () => this.select(kind), { signal: this.lifetime.signal });
+				this.engines.set(kind, button);
+				engines.append(button);
+			}
+			this.summary.className = "summary";
+			this.toggle.type = "button";
+			this.toggle.className = "settings-toggle";
+			this.toggle.innerHTML = "<span>設定</span><svg class=\"chevron\" viewBox=\"0 0 16 16\" aria-hidden=\"true\" focusable=\"false\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M4 6 8 10 12 6\"/></svg>";
+			this.toggle.setAttribute("aria-controls", "queue-settings");
+			this.toggle.addEventListener("click", () => this.setExpanded(!this.expanded), { signal: this.lifetime.signal });
+			this.execute.type = "button";
+			this.execute.className = "primary";
+			this.execute.textContent = "加入佇列";
+			this.execute.addEventListener("click", () => void this.runSelected(), { signal: this.lifetime.signal });
+			bar.append(title, engines, this.summary, this.toggle, this.execute);
+			this.disclosure.id = "queue-settings";
+			this.disclosure.className = "disclosure";
+			this.disclosure.setAttribute("role", "region");
+			this.disclosure.setAttribute("aria-label", this.isQueue() ? "排隊設定" : "工具設定");
+			const inner = document.createElement("div");
+			inner.className = "disclosure-inner";
+			const content = document.createElement("div");
+			content.className = "settings-content";
+			for (const { id: kind, settings } of this.modules) {
+				const form = new SettingsForm(() => {
+					this.settings.save(this.registry.modules);
+					this.updateState();
+				}, this.notifications, "segments");
+				const element = form.render(settings);
+				element.setAttribute("aria-label", `${this.engineName(kind)} 設定`);
+				this.forms.set(kind, form);
+				this.formElements.set(kind, element);
+				content.append(element);
+			}
+			const note = this.note;
+			note.className = "settings-note";
+			content.append(note);
+			inner.append(content);
+			this.disclosure.append(inner);
+			this.feedback.className = "feedback";
+			this.feedback.hidden = true;
+			this.feedback.setAttribute("role", "status");
+			this.feedback.setAttribute("aria-live", "polite");
+			toolbar.append(bar, this.disclosure, this.feedback);
+			this.shadow.append(style, toolbar);
+			this.unsubscribe = this.runner.subscribe(() => this.updateState());
+			this.select(this.selected);
+			this.setExpanded(false);
+			this.place();
+			this.layoutObserver.observe(document.body, {
+				childList: true,
+				subtree: true
+			});
+		}
+		updateVisibility() {
+			this.generation++;
+			this.feedback.hidden = true;
+			this.forms.forEach((form) => form.refreshVisibility());
+			this.place();
+			this.updateState();
+		}
+		dispose() {
+			this.generation++;
+			this.lifetime.abort();
+			this.unsubscribe?.();
+			this.layoutObserver.disconnect();
+			this.themeObserver.disconnect();
+			if (this.frame !== null) cancelAnimationFrame(this.frame);
+			this.forms.forEach((form) => form.dispose());
+			this.host.remove();
+		}
+		select(kind) {
+			this.generation++;
+			this.forms.forEach((form) => form.cancelCapture());
+			this.selected = kind;
+			this.host.dataset.engine = kind === "queue-gpt" ? "gpt" : "sakura";
+			this.choices.style.setProperty("--enum-index", String(this.modules.findIndex((module) => module.id === kind)));
+			this.feedback.hidden = true;
+			this.formElements.forEach((element, engine) => {
+				element.hidden = engine !== kind;
+			});
+			this.updateState();
+		}
+		setExpanded(expanded) {
+			if (!expanded) {
+				this.forms.forEach((form) => form.cancelCapture());
+				if (this.disclosure.contains(this.shadow.activeElement)) this.toggle.focus();
+			}
+			this.expanded = expanded;
+			this.disclosure.classList.toggle("expanded", expanded);
+			this.disclosure.setAttribute("aria-hidden", String(!expanded));
+			this.toggle.setAttribute("aria-expanded", String(expanded));
+			this.updateState();
+		}
+		updateState() {
+			const module = this.registry.get(this.selected);
+			const busy = this.isQueue() ? this.modules.some((item) => this.runner.isRunning(item)) : module.kind === "command" && this.runner.isRunning(module);
+			this.engines.forEach((button, kind) => {
+				button.setAttribute("aria-pressed", String(kind === this.selected));
+				button.disabled = this.isQueue() && busy;
+				button.dataset.enabled = String(this.runner.isEnabled(this.registry.get(kind)));
+			});
+			this.execute.disabled = busy;
+			const active = module.kind === "continuous" && this.runner.isEnabled(module);
+			this.execute.textContent = busy ? "執行中…" : this.isQueue() ? "加入佇列" : module.kind === "continuous" ? active ? "停止自動重試" : "啟用自動重試" : module.name;
+			this.execute.setAttribute("aria-label", this.isQueue() ? `加入 ${this.engineName(this.selected)} 佇列` : this.execute.textContent);
+			this.execute.setAttribute("aria-busy", String(busy));
+			this.disclosure.inert = !this.expanded || busy;
+			if (module.kind === "continuous") this.execute.setAttribute("aria-pressed", String(active));
+			else this.execute.removeAttribute("aria-pressed");
+			this.execute.classList.toggle("danger", module.id === "delete-translators");
+			this.summary.textContent = this.isQueue() ? this.queueSummary(module) : this.modules.some((item) => item.kind === "continuous" && this.runner.isEnabled(item)) ? "自動重試已啟用" : "";
+			this.note.textContent = this.isQueue() ? "套用目前頁面範圍 · 設定自動儲存 · 僅加入佇列" : module.id === "delete-translators" ? "刪除目前工作區的翻譯器，保留名稱符合「排除」的項目。" : "套用目前工作區 · 設定自動儲存";
+			this.execute.title = this.isQueue() ? `${this.engineName(this.selected)} · ${this.summary.textContent} · 僅加入佇列` : this.execute.textContent;
+		}
+		async runSelected() {
+			const module = this.registry.get(this.selected);
+			if (module.kind === "continuous" && this.runner.isEnabled(module)) {
+				this.runner.activate(module);
+				return;
+			}
+			const invalid = [...this.formElements.get(this.selected)?.querySelectorAll("input") ?? []].find((input) => !input.closest("[hidden]") && !input.validity.valid);
+			if (invalid) {
+				this.setExpanded(true);
+				invalid.reportValidity();
+				return;
+			}
+			if (module.kind === "continuous") {
+				this.runner.activate(module);
+				return;
+			}
+			const generation = this.generation;
+			this.feedback.dataset.status = "pending";
+			this.feedback.textContent = this.isQueue() ? `正在加入 ${this.engineName(this.selected)} 佇列…` : `正在${module.name}…`;
+			this.feedback.hidden = false;
+			const result = await this.runner.run(module, false);
+			if (this.lifetime.signal.aborted || generation !== this.generation) return;
+			this.feedback.hidden = result.status === "cancelled" || !result.message;
+			this.feedback.textContent = result.message;
+			this.feedback.dataset.status = result.status;
+		}
+		schedulePlacement() {
+			if (this.frame !== null || this.lifetime.signal.aborted) return;
+			this.frame = requestAnimationFrame(() => {
+				this.frame = null;
+				if (!this.lifetime.signal.aborted) this.place();
+			});
+		}
+		place() {
+			if (!this.modules.some((module) => module.supports(location.pathname))) return;
+			const point = this.site.toolboxMountPoint();
+			if (!point) return;
+			const changed = point.parent !== this.parent || point.before !== this.before;
+			if (changed || !this.host.isConnected || this.host.nextElementSibling !== point.before) point.parent.insertBefore(this.host, point.before);
+			if (changed) {
+				this.parent = point.parent;
+				this.before = point.before;
+				this.themeObserver.disconnect();
+				for (let element = this.parent; element; element = element.parentElement) this.themeObserver.observe(element, {
+					attributes: true,
+					attributeFilter: ["class", "style"]
+				});
+				if (this.before) this.themeObserver.observe(this.before, {
+					attributes: true,
+					attributeFilter: ["class", "style"]
+				});
+			}
+			this.syncTheme();
+		}
+		syncTheme() {
+			if (!this.parent?.isConnected) return;
+			const channels = (getComputedStyle(this.parent).getPropertyValue("--n-color").trim() || getComputedStyle(document.body).backgroundColor).match(/[\d.]+/g)?.map(Number);
+			const dark = channels && channels.length >= 3 && channels[3] !== 0 ? channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722 < 128 : matchMedia("(prefers-color-scheme: dark)").matches;
+			this.host.style.colorScheme = dark ? "dark" : "light";
+			this.host.dataset.theme = dark ? "dark" : "light";
+		}
+		isQueue() {
+			return this.selected.startsWith("queue-");
+		}
+		queueSummary(module) {
+			const page = pageKind(location.pathname);
+			const scope = page === "novels" ? `前 ${numberValue(module.settings, "單次擷取web數量(可破限)")} 本` : page === "wenkus" ? `前 ${numberValue(module.settings, "擷取單頁wenku數量(deving)")} 本` : page.startsWith("favorite-") ? "目前收藏夾" : "目前小說";
+			const split = [
+				"novels",
+				"novel",
+				"favorite-web"
+			].includes(page) ? ` · ${stringValue(module.settings, "分段")}` : "";
+			return `${scope} · ${stringValue(module.settings, "模式")}${split}`;
+		}
+		engineName(kind) {
+			if (kind === "queue-sakura") return "Sakura";
+			if (kind === "queue-gpt") return "GPT";
+			return kind.startsWith("add-") ? "新增翻譯器" : this.registry.get(kind).name;
+		}
+	};
+	var PageView = class {
+		registry;
+		runner;
+		settings;
+		notifications;
+		site;
+		view = null;
+		page = "";
+		constructor(registry, runner, settings, notifications, site) {
+			this.registry = registry;
+			this.runner = runner;
+			this.settings = settings;
+			this.notifications = notifications;
+			this.site = site;
+		}
+		mount() {
+			this.updateVisibility();
+		}
+		updateVisibility() {
+			const page = `${pageKind(location.pathname)}:${workspaceKind(location.pathname) ?? ""}`;
+			if (this.view && page === this.page) {
+				this.view.updateVisibility();
+				return;
+			}
+			this.view?.dispose();
+			this.page = page;
+			this.view = queueSupported(location.pathname) || workspaceKind(location.pathname) ? new EmbeddedToolboxView(this.registry, this.runner, this.settings, this.notifications, this.site) : null;
+			this.view?.mount();
+		}
+		dispose() {
+			this.view?.dispose();
+			this.view = null;
+		}
+	};
+	_css("#ntr-panel{z-index:9999;box-sizing:border-box;color:#ddd;background:#1e1e1e;border:1px solid #444;border-radius:8px;width:340px;max-width:calc(100vw - 24px);padding:8px;font:14px/1.5 Arial,sans-serif;position:fixed;top:70px;left:20px;box-shadow:0 3px 14px #0005}#ntr-panel [hidden]{display:none!important}#ntr-panel button,#ntr-panel input,#ntr-panel select{font:inherit;box-sizing:border-box}#ntr-panel button,#ntr-panel input:not([type=checkbox]),#ntr-panel select{color:#eee;background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:4px 6px}#ntr-panel button{cursor:pointer}#ntr-panel button:disabled{opacity:.65;cursor:progress}#ntr-panel button:focus-visible,#ntr-panel input:focus-visible,#ntr-panel select:focus-visible{outline:2px solid #63e2b7}#ntr-panel.minimized{width:230px}#ntr-panel .ntr-titlebar{cursor:move;-webkit-user-select:none;user-select:none;touch-action:none;background:#292929;border-radius:4px;justify-content:space-between;align-items:center;gap:8px;padding:8px;font-weight:700;display:flex}#ntr-panel .ntr-panel-body{max-height:calc(100dvh - 150px);margin-top:8px;overflow-y:auto}#ntr-panel .ntr-module-container{border:1px solid #444;border-radius:4px;margin-bottom:8px}#ntr-panel .ntr-module-header{background:#2e2e2e;gap:4px;padding:4px;display:flex}#ntr-panel .ntr-module-action{text-align:left;flex:1}#ntr-panel .ntr-module-action.active{color:#111;background:#63e2b7}#ntr-panel .ntr-settings-container{padding:8px}#ntr-panel .ntr-setting-row{grid-template-columns:minmax(0,1fr) 120px;align-items:center;gap:8px;margin:6px 0;display:grid}#ntr-panel .ntr-setting-row>span{overflow-wrap:anywhere}#ntr-panel .ntr-setting-row>small{color:#aaa;grid-column:1/-1}#ntr-panel .ntr-setting-row input:not([type=checkbox]),#ntr-panel .ntr-setting-row select{width:100%;min-width:0}#ntr-panel .ntr-info{color:#aaa;padding-top:4px;font-size:11px}.ntr-notification-container{z-index:10000;pointer-events:none;width:min(500px,100vw - 24px);position:fixed;top:16px;left:50%;transform:translate(-50%)}.ntr-notification-message{color:#eee;overflow-wrap:anywhere;background:#292929;border:1px solid #666;border-radius:6px;margin-bottom:8px;padding:10px 14px;font:14px/1.5 Arial,sans-serif;box-shadow:0 3px 14px #0005}.ntr-notification-message.failed{border-color:#d66}.ntr-notification-message.partial{border-color:#ca5}@media (pointer:coarse){#ntr-panel button{min-height:36px}#ntr-panel .ntr-setting-row{grid-template-columns:minmax(0,1fr) 110px}}");
 	var runtime = window;
 	if (allowedHost(location.hostname) && !runtime._NTRToolBoxInstance) {
 		const settings = new SettingsService(localStorage);
@@ -1579,7 +1835,7 @@ SOFTWARE.
 		]);
 		const notifications = new NotificationView();
 		const runner = new ModuleRunner(registry, settings, notifications);
-		const app = new ToolboxApp(registry, runner, settings, workspace, new PanelView(registry, runner, settings, notifications, version), new KeyboardBindings(registry, runner), notifications);
+		const app = new ToolboxApp(registry, runner, settings, workspace, new PageView(registry, runner, settings, notifications, site), new KeyboardBindings(registry, runner), notifications);
 		try {
 			app.start();
 			runtime._NTRToolBoxInstance = true;
