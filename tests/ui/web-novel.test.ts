@@ -242,6 +242,66 @@ it('uses the embedded toolbar across routes and removes it on unsupported pages'
     );
 });
 
+it.each(['/novel', '/wenku', '/favorite/web/all', '/favorite/wenku/default'])(
+    'keeps controls before loading, error, empty and loaded results on %s',
+    async (path) => {
+        history.replaceState(null, '', path);
+        document.body.innerHTML =
+            '<main><h1>列表</h1><div class="filters">篩選</div><div class="n-spin"></div></main>';
+        const { root, change } = fixture();
+        const host = document.querySelector('#ntr-web-novel')!;
+        const originalRoot = root();
+        root().querySelector<HTMLButtonElement>('.settings-toggle')!.click();
+        change('模式', '重翻');
+        for (const markup of [
+            '<div class="n-spin"></div>',
+            '<div class="n-result">加载错误</div>',
+            '<div class="n-empty">空列表</div>',
+            '<ul class="n-list"><li>小說</li></ul>',
+            '<div class="n-pagination">1</div><ul></ul>',
+        ]) {
+            const main = document.querySelector('main')!;
+            [...main.children]
+                .filter((child) => child !== host && !child.matches('h1, .filters'))
+                .forEach((child) => child.remove());
+            main.insertAdjacentHTML('beforeend', markup);
+            await vi.runAllTimersAsync();
+            expect(host.previousElementSibling?.className).toBe('filters');
+            expect(host.nextElementSibling).toBe(
+                main.querySelector(
+                    '.n-spin, .n-result, .n-empty, .n-list, .n-pagination',
+                ),
+            );
+            expect(root()).toBe(originalRoot);
+            expect(
+                root().querySelector('.settings-toggle')?.getAttribute('aria-expanded'),
+            ).toBe('true');
+            expect(document.querySelectorAll('#ntr-web-novel')).toHaveLength(1);
+        }
+        expect(
+            root().querySelector('[aria-label="翻譯模式"] [aria-checked="true"]')
+                ?.textContent,
+        ).toBe('重翻');
+    },
+);
+
+it('repositions before a nested loading region that arrives after mounting', async () => {
+    document.body.innerHTML =
+        '<main><h1>网络小说</h1><div class="filters">篩選</div><section id="results"><div id="inner"></div></section></main>';
+    const { root } = fixture();
+    const originalRoot = root();
+    document.querySelector('#inner')!.innerHTML = '<div class="n-spin"></div>';
+    await vi.runAllTimersAsync();
+    const host = document.querySelector('#ntr-web-novel')!;
+    expect(host.nextElementSibling).toBe(document.querySelector('#results'));
+    document.querySelector('#inner')!.innerHTML =
+        '<div class="n-pagination">1</div><ul></ul>';
+    await vi.runAllTimersAsync();
+    expect(host.nextElementSibling).toBe(document.querySelector('#results'));
+    expect(root()).toBe(originalRoot);
+    expect(document.querySelectorAll('#ntr-web-novel')).toHaveLength(1);
+});
+
 it('supports keyboard enum selection and uses the chosen mode when queuing', async () => {
     const { root, activeForm, queued } = fixture();
     root().querySelector<HTMLButtonElement>('.settings-toggle')!.click();
@@ -266,6 +326,10 @@ it.each(['/novel/a/b', '/wenku/id', '/favorite/web/all', '/favorite/wenku/defaul
         history.replaceState(null, '', path);
         if (path.includes('/id') || path.includes('/a/b'))
             document.querySelector('h1')!.outerHTML = '<h2>小說標題</h2>';
+        if (path.includes('/id'))
+            document
+                .querySelector('main')!
+                .insertAdjacentHTML('beforeend', '<h2>目录</h2>');
         if (path.includes('/a/b')) {
             const metadata = document.createElement('div');
             metadata.className = 'metadata-stat';
@@ -321,6 +385,36 @@ it('uses the workspace anchor until the comments section arrives', async () => {
     );
     expect(document.querySelectorAll('#ntr-web-novel')).toHaveLength(1);
 });
+
+it.each([true, false])(
+    'places wenku controls below illustrations and above the TOC (gallery: %s)',
+    async (gallery) => {
+        history.replaceState(null, '', '/wenku/example');
+        document.body.innerHTML =
+            '<div class="layout-content" id="cover"><img alt="cover"><h2>小說標題</h2></div><div class="layout-content" id="content"><p>簡介</p></div>';
+        const { root } = fixture();
+        expect(document.querySelector('#ntr-web-novel')).toBeNull();
+        const content = document.querySelector('#content')!;
+        content.insertAdjacentHTML(
+            'beforeend',
+            `${gallery ? '<div id="gallery"><img alt="插圖"></div>' : ''}<div class="n-tabs" id="toc"><div class="n-tabs-tab" data-name="wenkuToc"><span>目录</span></div><div class="n-tab-pane"><ul></ul></div></div>`,
+        );
+        await vi.runAllTimersAsync();
+        const host = document.querySelector('#ntr-web-novel')!;
+        expect(host.parentElement).toBe(content);
+        expect(host.nextElementSibling?.id).toBe('toc');
+        expect(host.previousElementSibling?.tagName).toBe(gallery ? 'DIV' : 'P');
+        if (gallery) expect(host.previousElementSibling?.id).toBe('gallery');
+        expect(document.querySelector('#cover')!.contains(host)).toBe(false);
+        const originalRoot = root();
+        document.querySelector('.n-tab-pane')!.innerHTML =
+            '<h2>評論</h2><div class="n-spin"></div>';
+        await vi.runAllTimersAsync();
+        expect(root()).toBe(originalRoot);
+        expect(host.nextElementSibling?.id).toBe('toc');
+        expect(document.querySelectorAll('#ntr-web-novel')).toHaveLength(1);
+    },
+);
 
 it('switches workspace tools, preserves settings, and can stop an active continuous tool', async () => {
     history.replaceState(null, '', '/workspace/sakura');

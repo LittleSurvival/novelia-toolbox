@@ -6,45 +6,54 @@ export class SiteAdapter {
     toolboxMountPoint(): { parent: HTMLElement; before: Element | null } | null {
         const page = pageKind(location.pathname);
         if (page === 'other') return null;
-        if (page === 'novel' || page === 'wenku') {
+        if (page === 'wenku') {
+            // The cover banner and the volume gallery are separate content containers.
+            // Keep the toolbar immediately above the TOC (including the new tabbed UI).
+            const toc =
+                document.querySelector('.n-tabs-tab[data-name="wenkuToc"]') ??
+                [
+                    ...document.querySelectorAll(
+                        '.layout-content h2, .layout-content h3, main h2, main h3',
+                    ),
+                ].find((heading) =>
+                    ['目录', '目錄'].includes(heading.textContent?.trim() ?? ''),
+                );
+            const parent = toc?.closest<HTMLElement>('.layout-content, main');
+            const before =
+                parent && [...parent.children].find((child) => child.contains(toc!));
+            return parent && before ? { parent, before } : null;
+        }
+        if (page === 'novel') {
             // Web novels have a fixed right-hand TOC. Stay inside the metadata column;
             // a toolbar spanning the outer layout would sit underneath that fixed TOC.
             const content = document.querySelector<HTMLElement>('.layout-content, main');
             if (!content?.querySelector('h1, h2, h3')) return null;
             const parent =
-                page === 'novel'
-                    ? content.querySelector<HTMLElement>('.metadata-stat')?.parentElement
-                    : content;
+                content.querySelector<HTMLElement>('.metadata-stat')?.parentElement;
             if (!parent) return null;
             const children = [...parent.children].filter(
                 (element) => !element.hasAttribute('data-ntr-root'),
             );
-            if (page === 'novel') {
-                const comments = [...parent.querySelectorAll('h2, h3')].find((heading) =>
-                    ['评论', '評論'].includes(heading.textContent?.trim() ?? ''),
-                );
-                const commentSection =
-                    comments && children.find((element) => element.contains(comments));
-                if (commentSection) return { parent, before: commentSection };
-                // While comments are loading, stay after the native workspace actions.
-                const workspace = children.find((element) =>
-                    [...element.querySelectorAll('button')].some((button) =>
-                        ['导入工作区', '導入工作區'].includes(
-                            button.textContent?.trim() ?? '',
-                        ),
+            const comments = [...parent.querySelectorAll('h2, h3')].find((heading) =>
+                ['评论', '評論'].includes(heading.textContent?.trim() ?? ''),
+            );
+            const commentSection =
+                comments && children.find((element) => element.contains(comments));
+            if (commentSection) return { parent, before: commentSection };
+            // While comments are loading, stay after the native workspace actions.
+            const workspace = children.find((element) =>
+                [...element.querySelectorAll('button')].some((button) =>
+                    ['导入工作区', '導入工作區'].includes(
+                        button.textContent?.trim() ?? '',
                     ),
-                );
-                return workspace
-                    ? {
-                          parent,
-                          before: children[children.indexOf(workspace) + 1] ?? null,
-                      }
-                    : null;
-            }
-            return {
-                parent,
-                before: children[0] ?? null,
-            };
+                ),
+            );
+            return workspace
+                ? {
+                      parent,
+                      before: children[children.indexOf(workspace) + 1] ?? null,
+                  }
+                : null;
         }
         const heading = document.querySelector<HTMLElement>(
             '.layout-content h1, main h1',
@@ -66,8 +75,13 @@ export class SiteAdapter {
                 before: section ?? children[children.indexOf(heading!) + 1] ?? null,
             };
         }
+        // CPage has no pagination while loading, on errors or for a single page.
+        // Anchor to its result region in every state, outside any loading wrapper.
+        const results = '.n-pagination, .n-spin, .n-result, .n-empty, .n-list';
         const before =
-            children.find((element) => element.matches('.n-pagination')) ??
+            children.find(
+                (element) => element.matches(results) || element.querySelector(results),
+            ) ??
             children.find((element) => element.matches('ul, [role="list"]')) ??
             null;
         return { parent, before };

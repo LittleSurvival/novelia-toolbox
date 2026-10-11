@@ -31,7 +31,7 @@ export class EmbeddedToolboxView implements ToolboxView {
             !this.host.isConnected ||
             records.some(
                 (record) =>
-                    record.target === this.parent &&
+                    this.parent?.contains(record.target) &&
                     [...record.addedNodes, ...record.removedNodes].some(
                         (node) => node !== this.host,
                     ),
