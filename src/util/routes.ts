@@ -1,5 +1,6 @@
 import type { PageKind } from '../types/PageKind';
 import type { TranslatorKind } from '../types/TranslatorKind';
+import type { WorkerWorkspaceKind } from '../types/WorkerWorkspaceKind';
 
 export function allowedHost(hostname: string): boolean {
     return ['books.fishhawk.top', 'books1.fishhawk.top', 'n.novelia.cc'].includes(
@@ -27,15 +28,24 @@ export function pageKind(pathname: string): PageKind {
     if (/^\/favorite\/wenku(?:\/|$)/.test(path)) {
         return 'favorite-wenku';
     }
-    if (/^\/workspace\/(sakura|gpt)$/.test(path)) {
+    if (workspaceKind(path)) {
         return 'workspace';
     }
     return 'other';
 }
 
 export function workspaceKind(pathname: string): TranslatorKind | null {
-    const match = /^\/workspace\/(sakura|gpt)\/?$/.exec(pathname);
+    const match = /^\/workspace\/(sakura|gpt)(?:-pipeline)?\/?$/.exec(pathname);
     return match?.[1] === 'sakura' ? 'sakura' : match?.[1] === 'gpt' ? 'gpt' : null;
+}
+
+export function isPipelineWorkspace(pathname: string): boolean {
+    return /^\/workspace\/(sakura|gpt)-pipeline\/?$/.test(pathname);
+}
+
+export function workerWorkspaceKind(pathname: string): WorkerWorkspaceKind | null {
+    const kind = workspaceKind(pathname);
+    return kind === 'gpt' && isPipelineWorkspace(pathname) ? 'gpt-pipeline' : kind;
 }
 
 export function queueSupported(pathname: string): boolean {

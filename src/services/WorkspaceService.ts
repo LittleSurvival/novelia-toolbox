@@ -1,4 +1,5 @@
 import type { TranslatorKind } from '../types/TranslatorKind';
+import type { WorkerWorkspaceKind } from '../types/WorkerWorkspaceKind';
 import type { WorkspaceData } from '../interfaces/WorkspaceData';
 import type { WorkspaceWorker } from '../interfaces/WorkspaceWorker';
 import type { WorkspaceJob } from '../interfaces/WorkspaceJob';
@@ -6,11 +7,13 @@ import type { RetryResult } from '../interfaces/RetryResult';
 import { isRecord } from '../util/record';
 import { finishedJob, insertJob } from '../util/workspaceJobs';
 import { taskIdentity } from '../util/taskLinks';
+import { isPipelineWorkspace } from '../util/routes';
+import { SiteAdapter } from './SiteAdapter';
 
 export class WorkspaceService {
     constructor(private readonly storage: Storage) {}
 
-    read(kind: TranslatorKind): WorkspaceData {
+    read(kind: WorkerWorkspaceKind): WorkspaceData {
         const raw = this.storage.getItem(this.key(kind));
         const defaults: WorkspaceData = {
             workers:
@@ -51,11 +54,12 @@ export class WorkspaceService {
     }
 
     async upsertWorkers(
-        kind: TranslatorKind,
+        kind: WorkerWorkspaceKind,
         workers: WorkspaceWorker[],
         signal: AbortSignal,
     ): Promise<number> {
         return this.mutate(kind, signal, (data) => {
+            this.assertWorkersStopped(workers.map((worker) => worker.id));
             for (const worker of workers) {
                 const index = data.workers.findIndex(
                     (existing) => existing.id === worker.id,
@@ -71,12 +75,20 @@ export class WorkspaceService {
     }
 
     async removeWorkers(
-        kind: TranslatorKind,
+        kind: WorkerWorkspaceKind,
         exclusions: string[],
         signal: AbortSignal,
     ): Promise<number> {
         return this.mutate(kind, signal, (data) => {
             const before = data.workers.length;
+            this.assertWorkersStopped(
+                data.workers
+                    .filter(
+                        (worker) =>
+                            !exclusions.some((keyword) => worker.id.includes(keyword)),
+                    )
+                    .map((worker) => worker.id),
+            );
             data.workers = data.workers.filter((worker) =>
                 exclusions.some((keyword) => worker.id.includes(keyword)),
             );
@@ -136,7 +148,7 @@ export class WorkspaceService {
         });
     }
 
-    async refresh(kind: TranslatorKind, signal: AbortSignal): Promise<void> {
+    async refresh(kind: WorkerWorkspaceKind, signal: AbortSignal): Promise<void> {
         // Notify the current SPA without writing back a potentially stale snapshot.
         signal.throwIfAborted();
         const key = this.key(kind);
@@ -153,12 +165,21 @@ export class WorkspaceService {
         }
     }
 
-    private key(kind: TranslatorKind): string {
+    private key(kind: WorkerWorkspaceKind): string {
         return `workspace-${kind}`;
     }
 
+    private assertWorkersStopped(ids: string[]): void {
+        if (!isPipelineWorkspace(location.pathname)) return;
+        const running = new Set(new SiteAdapter().runningWorkerIds());
+        const id = ids.find((id) => running.has(id));
+        if (id !== undefined) {
+            throw new Error(`請先停止翻譯器「${id}」後再修改或刪除`);
+        }
+    }
+
     private async mutate<T>(
-        kind: TranslatorKind,
+        kind: WorkerWorkspaceKind,
         signal: AbortSignal,
         change: (data: WorkspaceData) => T,
     ): Promise<T> {

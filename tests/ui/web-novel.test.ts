@@ -442,3 +442,47 @@ it('switches workspace tools, preserves settings, and can stop an active continu
     expect(root().querySelector('input[type="password"]')).not.toBeNull();
     expect(root().querySelector('.primary')?.textContent).toBe('添加GPT翻譯器');
 });
+
+it('keeps workspace controls above workers and refreshes beta-only settings across SPA routes', async () => {
+    const workspacePage = (title: string) => {
+        document.body.innerHTML = `<main><h1>${title}</h1><div class="notice">BETA</div><div id="workers-heading"><h2>翻译器</h2><button>添加翻译器</button></div><ul class="worker-list"></ul><h2>任务队列</h2><div class="task-list"></div></main>`;
+    };
+    history.replaceState(null, '', '/workspace/gpt');
+    workspacePage('GPT');
+    const { view, root, change, input, activeForm } = fixture(true);
+    expect(
+        activeForm().querySelector<HTMLElement>('[data-setting="並發數"]')!.hidden,
+    ).toBe(true);
+    history.replaceState(null, '', '/workspace/gpt-pipeline');
+    workspacePage('GPT BETA');
+    view.updateVisibility();
+    await vi.runAllTimersAsync();
+    expect(root().querySelectorAll('.module-tabs button')).toHaveLength(4);
+    expect(document.querySelector('#ntr-web-novel')!.nextElementSibling?.id).toBe(
+        'workers-heading',
+    );
+    expect(
+        activeForm().querySelector<HTMLElement>('[data-setting="並發數"]')!.hidden,
+    ).toBe(false);
+    change('並發數', '4');
+    expect(root().querySelector('.settings-note')!.textContent).toContain(
+        'GPT beta 翻譯器獨立',
+    );
+    history.replaceState(null, '', '/workspace/sakura-pipeline');
+    workspacePage('Sakura BETA');
+    view.updateVisibility();
+    await vi.runAllTimersAsync();
+    expect(root().querySelector('.primary')!.textContent).toBe('添加Sakura翻譯器');
+    expect(root().querySelector('input[type="password"]')).toBeNull();
+    expect(input('並發數').value).toBe('1');
+    expect(root().querySelector('.settings-note')!.textContent).toContain('皆與原版');
+    history.replaceState(null, '', '/workspace/gpt-pipeline');
+    view.updateVisibility();
+    expect(input('並發數').value).toBe('4');
+    history.replaceState(null, '', '/workspace/gpt');
+    view.updateVisibility();
+    expect(
+        activeForm().querySelector<HTMLElement>('[data-setting="並發數"]')!.hidden,
+    ).toBe(true);
+    expect(document.querySelectorAll('#ntr-web-novel')).toHaveLength(1);
+});

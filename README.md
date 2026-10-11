@@ -85,6 +85,18 @@ Once installed, the script will automatically run on the supported websites (n.n
 
 ## 開發
 
+### 工作區 BETA
+
+工具列支援 `/workspace/gpt-pipeline` 與 `/workspace/sakura-pipeline`，提供批量新增、刪除、啟動與自動重試。
+
+- GPT beta 的翻譯器獨立管理；任務與原版 GPT 工作區共用。
+- Sakura beta 的翻譯器、任務皆與原版 Sakura 工作區共用。
+- beta 新增翻譯器可設定每個翻譯器的並發數（1–100）。GPT 使用原生預設 OpenAI 相容接口；同名更新保留既有接口 profile 等額外設定。
+- beta 自動重試透過原生任務卡重試失敗章節，可選置頂及重啟翻譯器；只處理目前篩選顯示的任務，請選「全部」或「未完成」。隱藏的任務不會被重試。
+- 修改或刪除正在執行的 beta 翻譯器前，須先停止該翻譯器。
+
+### 開發指令
+
 需要 Node.js 22.12 以上；使用 TypeScript、Vite + vite-plugin-monkey，將 `src/` 打包成單一 userscript。
 
 ```bash

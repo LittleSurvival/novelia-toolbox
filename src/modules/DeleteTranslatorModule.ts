@@ -3,7 +3,7 @@ import type { ModuleContext } from '../interfaces/ModuleContext';
 import type { RunResult } from '../interfaces/RunResult';
 import { WorkspaceService } from '../services/WorkspaceService';
 import { exclusions, stringSetting, stringValue } from '../util/settings';
-import { workspaceKind } from '../util/routes';
+import { workspaceKind, workerWorkspaceKind } from '../util/routes';
 
 export class DeleteTranslatorModule implements ToolboxModule {
     readonly id = 'delete-translators';
@@ -21,7 +21,7 @@ export class DeleteTranslatorModule implements ToolboxModule {
     }
 
     async execute({ signal }: ModuleContext): Promise<RunResult> {
-        const kind = workspaceKind(location.pathname);
+        const kind = workerWorkspaceKind(location.pathname);
         if (!kind) {
             throw new Error('請先開啟翻譯器工作區');
         }

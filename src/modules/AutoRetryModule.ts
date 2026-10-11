@@ -12,7 +12,7 @@ import {
     numberValue,
 } from '../util/settings';
 import { readLaunchOptions } from '../util/launchSettings';
-import { workspaceKind } from '../util/routes';
+import { isPipelineWorkspace, workspaceKind } from '../util/routes';
 
 export class AutoRetryModule implements ToolboxModule {
     readonly id = 'auto-retry';
@@ -55,7 +55,11 @@ export class AutoRetryModule implements ToolboxModule {
             this.listening = true;
         }
         const quiet: RunResult = { status: 'success', message: '' };
-        if (Date.now() < this.nextRun || this.site.runningCount() > 0) {
+        const pipeline = isPipelineWorkspace(location.pathname);
+        if (
+            Date.now() < this.nextRun ||
+            (pipeline ? this.site.pipelineTranslating() : this.site.runningCount() > 0)
+        ) {
             return quiet;
         }
         if (this.attempts >= numberValue(this.settings, '最大重試次數')) {
@@ -65,15 +69,16 @@ export class AutoRetryModule implements ToolboxModule {
         if (!kind) {
             return quiet;
         }
-        const unfinished = this.workspace.unfinishedCount(kind);
-        if (!unfinished) {
-            return quiet;
+        const moveToTop = booleanValue(this.settings, '置頂重試任務');
+        let retry;
+        if (pipeline) {
+            const retried = this.site.retryPipelineTasks(moveToTop, signal);
+            if (!retried) return quiet;
+            retry = { retried, skipped: 0 };
+        } else {
+            if (!this.workspace.unfinishedCount(kind)) return quiet;
+            retry = await this.workspace.retryUnfinishedJobs(kind, moveToTop, signal);
         }
-        const retry = await this.workspace.retryUnfinishedJobs(
-            kind,
-            booleanValue(this.settings, '置頂重試任務'),
-            signal,
-        );
         this.attempts++;
         this.nextRun =
             Date.now() + Math.min(60_000, 1000 * 2 ** Math.min(this.attempts - 1, 6));
@@ -85,7 +90,9 @@ export class AutoRetryModule implements ToolboxModule {
         }
         return {
             status: 'success',
-            message: `已重排 ${retry.retried} 個任務，跳過 ${retry.skipped} 個已排任務（第 ${this.attempts} 輪）`,
+            message: pipeline
+                ? `已重試 ${retry.retried} 個 beta 任務的失敗章節（第 ${this.attempts} 輪）`
+                : `已重排 ${retry.retried} 個任務，跳過 ${retry.skipped} 個已排任務（第 ${this.attempts} 輪）`,
         };
     }
 

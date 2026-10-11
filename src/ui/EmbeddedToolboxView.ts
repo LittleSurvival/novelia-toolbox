@@ -6,7 +6,7 @@ import { ModuleRunner } from '../core/ModuleRunner';
 import { SettingsService } from '../services/SettingsService';
 import { SiteAdapter } from '../services/SiteAdapter';
 import { numberValue, stringValue } from '../util/settings';
-import { pageKind } from '../util/routes';
+import { isPipelineWorkspace, pageKind, workspaceKind } from '../util/routes';
 import { NotificationView } from './NotificationView';
 import { SettingsForm } from './SettingsForm';
 import styles from '../styles/web-novel.css?inline';
@@ -253,9 +253,15 @@ export class EmbeddedToolboxView implements ToolboxView {
               : '';
         this.note.textContent = this.isQueue()
             ? '套用目前頁面範圍 · 設定自動儲存 · 僅加入佇列'
-            : module.id === 'delete-translators'
-              ? '刪除目前工作區的翻譯器，保留名稱符合「排除」的項目。'
-              : '套用目前工作區 · 設定自動儲存';
+            : isPipelineWorkspace(location.pathname)
+              ? module.id === 'auto-retry'
+                  ? '重試目前篩選中任務的失敗章節；請選「全部」或「未完成」。'
+                  : workspaceKind(location.pathname) === 'gpt'
+                    ? 'GPT beta 翻譯器獨立管理，任務與原版 GPT 工作區共用。'
+                    : 'Sakura beta 的翻譯器與任務皆與原版 Sakura 工作區共用。'
+              : module.id === 'delete-translators'
+                ? '刪除目前工作區的翻譯器，保留名稱符合「排除」的項目。'
+                : '套用目前工作區 · 設定自動儲存';
         this.execute.title = this.isQueue()
             ? `${this.engineName(this.selected)} · ${this.summary.textContent} · 僅加入佇列`
             : this.execute.textContent;

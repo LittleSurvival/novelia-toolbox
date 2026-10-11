@@ -37,3 +37,42 @@ it('ships shadow styles without document-scoped light/dark polyfill dependencies
         delete runtime._NTRToolBoxInstance;
     }
 });
+
+it('ships beta workspace routing and refreshes GPT worker and job stores separately', async () => {
+    const result = await build({
+        configFile: 'vite.config.ts',
+        logLevel: 'silent',
+        build: { write: false },
+    });
+    const bundles = Array.isArray(result) ? result : [result];
+    const script = bundles
+        .flatMap((bundle) => ('output' in bundle ? bundle.output : []))
+        .find(
+            (output) => output.type === 'chunk' && output.fileName.endsWith('.user.js'),
+        );
+    if (script?.type !== 'chunk') throw new Error('Missing production userscript');
+    history.replaceState(null, '', '/workspace/gpt-pipeline');
+    document.body.innerHTML =
+        '<main style="--n-color: rgb(16, 16, 20)"><h1>GPT工作区BETA</h1><div class="notice">公告</div><section id="workers"><h2>翻译器</h2></section></main>';
+    const stored = JSON.stringify({ workers: [], jobs: [], uncompletedJobs: [] });
+    localStorage.setItem('workspace-gpt', stored);
+    localStorage.setItem('workspace-gpt-pipeline', stored);
+    const events: string[] = [];
+    const listener = (event: StorageEvent) => events.push(event.key!);
+    window.addEventListener('storage', listener);
+    const runtime = window as RuntimeWindow;
+    try {
+        window.eval(script.code);
+        const host = document.querySelector('#ntr-web-novel')!;
+        expect(host.nextElementSibling?.id).toBe('workers');
+        expect(host.shadowRoot?.querySelectorAll('.module-tabs button')).toHaveLength(4);
+        expect(events).toEqual(['workspace-gpt', 'workspace-gpt-pipeline']);
+        expect(localStorage.getItem('workspace-gpt')).toBe(stored);
+        expect(localStorage.getItem('workspace-gpt-pipeline')).toBe(stored);
+    } finally {
+        window.removeEventListener('storage', listener);
+        runtime._NoveliaToolBoxApp?.dispose();
+        delete runtime._NoveliaToolBoxApp;
+        delete runtime._NTRToolBoxInstance;
+    }
+});

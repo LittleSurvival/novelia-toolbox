@@ -132,6 +132,57 @@ export class SiteAdapter {
         return this.buttons('停止').length;
     }
 
+    runningWorkerIds(): string[] {
+        return this.buttons('停止').map((button) => {
+            const title = button
+                .closest('.n-list-item')
+                ?.querySelector('.n-thing-header__title');
+            // Worker ID is header text; nested nodes contain model/endpoint/counters.
+            return [...(title?.childNodes ?? [])]
+                .filter((node) => node.nodeType === Node.TEXT_NODE)
+                .map((node) => node.textContent ?? '')
+                .join('')
+                .trim();
+        });
+    }
+
+    pipelineTranslating(): boolean {
+        return [
+            ...document.querySelectorAll('.task-list > .n-card .n-card-header .n-tag'),
+        ].some((tag) => ['翻译中', '翻譯中'].includes(tag.textContent?.trim() ?? ''));
+    }
+
+    retryPipelineTasks(moveToTop: boolean, signal: AbortSignal): number {
+        // Pipeline failures live in TaskState, not uncompletedJobs. Use the native
+        // card actions so completed chapters and cached segments stay intact.
+        const actions = [
+            ...document.querySelectorAll('.task-list > .n-card .n-card-header'),
+        ]
+            .filter((header) => !header.closest('[data-ntr-root]'))
+            .map((header) => ({
+                retry: header.querySelector<HTMLButtonElement>(
+                    'button.n-button--warning-type',
+                ),
+                // PipelineTaskCard renders top, bottom, retry (if failed), delete.
+                top: header.querySelector<HTMLButtonElement>('button'),
+            }))
+            .filter((action) => action.retry && !action.retry.disabled);
+        if (moveToTop) {
+            for (const { top } of [...actions].reverse()) {
+                signal.throwIfAborted();
+                if (top?.isConnected && !top.disabled) top.click();
+            }
+        }
+        let retried = 0;
+        for (const { retry } of actions) {
+            signal.throwIfAborted();
+            if (!retry?.isConnected || retry.disabled) continue;
+            retry.click();
+            retried++;
+        }
+        return retried;
+    }
+
     private favoriteCreateTimeFirst(): boolean {
         return (
             parseRecord(localStorage.getItem('setting'))?.favoriteCreateTimeFirst === true

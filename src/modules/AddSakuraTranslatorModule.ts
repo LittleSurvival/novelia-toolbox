@@ -4,6 +4,7 @@ import type { RunResult } from '../interfaces/RunResult';
 import { WorkspaceService } from '../services/WorkspaceService';
 import { numberSetting, numberValue, stringSetting, stringValue } from '../util/settings';
 import { workspaceKind } from '../util/routes';
+import { concurrencySetting, workerConcurrency } from '../util/workerSettings';
 
 export class AddSakuraTranslatorModule implements ToolboxModule {
     readonly id = 'add-sakura';
@@ -13,6 +14,7 @@ export class AddSakuraTranslatorModule implements ToolboxModule {
         numberSetting('數量', 5, 1),
         stringSetting('名稱', 'NTR translator '),
         stringSetting('鏈接', 'https://sakura-share.one'),
+        concurrencySetting(),
         stringSetting('bind', 'none'),
     ];
 
@@ -26,11 +28,13 @@ export class AddSakuraTranslatorModule implements ToolboxModule {
         const count = numberValue(this.settings, '數量');
         const prefix = stringValue(this.settings, '名稱');
         const endpoint = stringValue(this.settings, '鏈接');
+        const concurrency = workerConcurrency(this.settings);
         const workers = Array.from({ length: count }, (_, index) => ({
             id: `${prefix}${index + 1}`,
             endpoint,
             prevSegLength: 500,
             segLength: 500,
+            ...concurrency,
         }));
         const added = await this.workspace.upsertWorkers('sakura', workers, signal);
         return {

@@ -6,5 +6,6 @@ export interface WorkspaceWorker {
     key?: string;
     prevSegLength?: number;
     segLength?: number;
+    concurrency?: number;
     [key: string]: unknown;
 }

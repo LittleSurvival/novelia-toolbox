@@ -3,7 +3,8 @@ import type { ModuleContext } from '../interfaces/ModuleContext';
 import type { RunResult } from '../interfaces/RunResult';
 import { WorkspaceService } from '../services/WorkspaceService';
 import { numberSetting, numberValue, stringSetting, stringValue } from '../util/settings';
-import { workspaceKind } from '../util/routes';
+import { workspaceKind, workerWorkspaceKind } from '../util/routes';
+import { concurrencySetting, workerConcurrency } from '../util/workerSettings';
 
 export class AddGPTTranslatorModule implements ToolboxModule {
     readonly id = 'add-gpt';
@@ -15,6 +16,7 @@ export class AddGPTTranslatorModule implements ToolboxModule {
         stringSetting('模型', 'deepseek-chat'),
         stringSetting('鏈接', 'https://api.deepseek.com'),
         stringSetting('Key', 'sk-wait-for-input'),
+        concurrencySetting(),
         stringSetting('bind', 'none'),
     ];
 
@@ -30,13 +32,18 @@ export class AddGPTTranslatorModule implements ToolboxModule {
         const model = stringValue(this.settings, '模型');
         const endpoint = stringValue(this.settings, '鏈接');
         const key = stringValue(this.settings, 'Key');
+        const concurrency = workerConcurrency(this.settings);
         const workers = Array.from({ length: count }, (_, index) => ({
             id: `${prefix}${index + 1}`,
             model,
             endpoint,
             key,
+            ...concurrency,
         }));
-        const added = await this.workspace.upsertWorkers('gpt', workers, signal);
+        const kind = workerWorkspaceKind(location.pathname);
+        if (kind !== 'gpt' && kind !== 'gpt-pipeline')
+            throw new Error('請先開啟 GPT 工作區');
+        const added = await this.workspace.upsertWorkers(kind, workers, signal);
         return {
             status: 'success',
             message: `已新增或更新 ${added} 個 GPT 翻譯器`,

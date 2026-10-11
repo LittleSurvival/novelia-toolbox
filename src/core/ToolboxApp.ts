@@ -5,7 +5,7 @@ import { WorkspaceService } from '../services/WorkspaceService';
 import type { ToolboxView } from '../interfaces/ToolboxView';
 import { KeyboardBindings } from '../ui/KeyboardBindings';
 import { NotificationView } from '../ui/NotificationView';
-import { workspaceKind } from '../util/routes';
+import { workspaceKind, workerWorkspaceKind } from '../util/routes';
 
 export class ToolboxApp {
     private keepTimer: ReturnType<typeof setInterval> | null = null;
@@ -59,8 +59,12 @@ export class ToolboxApp {
     }
 
     private syncWorkspace(): void {
-        const kind = workspaceKind(location.pathname);
-        if (kind) {
+        const stores = new Set([
+            workspaceKind(location.pathname),
+            workerWorkspaceKind(location.pathname),
+        ]);
+        for (const kind of stores) {
+            if (!kind) continue;
             void this.workspace
                 .refresh(kind, this.routeController.signal)
                 .catch((error) => this.notifications.error(error));
