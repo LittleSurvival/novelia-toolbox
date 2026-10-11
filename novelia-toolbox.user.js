@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NTR ToolBox
 // @namespace    http://tampermonkey.net/
-// @version      1.0.0
+// @version      1.0.1
 // @author       TheNano
 // @description  ToolBox for Novel Translate bot website
 // @license      MIT
@@ -213,12 +213,19 @@ SOFTWARE.
 		if (path.startsWith("/novel/")) return "novel";
 		if (/^\/favorite\/web(?:\/|$)/.test(path)) return "favorite-web";
 		if (/^\/favorite\/wenku(?:\/|$)/.test(path)) return "favorite-wenku";
-		if (/^\/workspace\/(sakura|gpt)$/.test(path)) return "workspace";
+		if (workspaceKind(path)) return "workspace";
 		return "other";
 	}
 	function workspaceKind(pathname) {
-		const match = /^\/workspace\/(sakura|gpt)\/?$/.exec(pathname);
+		const match = /^\/workspace\/(sakura|gpt)(?:-pipeline)?\/?$/.exec(pathname);
 		return match?.[1] === "sakura" ? "sakura" : match?.[1] === "gpt" ? "gpt" : null;
+	}
+	function isPipelineWorkspace(pathname) {
+		return /^\/workspace\/(sakura|gpt)-pipeline\/?$/.test(pathname);
+	}
+	function workerWorkspaceKind(pathname) {
+		const kind = workspaceKind(pathname);
+		return kind === "gpt" && isPipelineWorkspace(pathname) ? "gpt-pipeline" : kind;
 	}
 	function queueSupported(pathname) {
 		return [
@@ -377,6 +384,147 @@ SOFTWARE.
 	function finishedJob(job) {
 		return isRecord(job.progress) && typeof job.progress.finished === "number" && typeof job.progress.total === "number" && job.progress.finished >= job.progress.total;
 	}
+	function listQuery(search, page, limit) {
+		const route = new URLSearchParams(search);
+		const selected = route.getAll("selected");
+		const mask = selectedNumber(selected[0], 255);
+		const providers = [
+			"kakuyomu",
+			"syosetu",
+			"novelup",
+			"hameln",
+			"pixiv",
+			"alphapolis"
+		].filter((_, index) => (mask & 1 << index) !== 0);
+		return new URLSearchParams({
+			page: String(page),
+			pageSize: String(limit),
+			query: route.get("query") ?? "",
+			provider: providers.join(","),
+			type: String(selectedNumber(selected[1], 0)),
+			level: String(selectedNumber(selected[2], 0)),
+			translate: String(selectedNumber(selected[3], 0)),
+			sort: String(selectedNumber(selected[4], 0))
+		});
+	}
+	function listPage(search) {
+		return Math.max(0, selectedNumber(new URLSearchParams(search).get("page") ?? void 0, 1) - 1);
+	}
+	function favoriteSort(search, createTimeFirst, offset = 4) {
+		return selectedNumber(new URLSearchParams(search).getAll("selected")[offset], 0) === 0 ? createTimeFirst ? "create" : "update" : createTimeFirst ? "update" : "create";
+	}
+	function selectedNumber(value, fallback) {
+		const parsed = value === void 0 || value === "" ? NaN : Number(value);
+		return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : fallback;
+	}
+	var SiteAdapter = class {
+		toolboxMountPoint() {
+			const page = pageKind(location.pathname);
+			if (page === "other") return null;
+			if (page === "wenku") {
+				const toc = document.querySelector(".n-tabs-tab[data-name=\"wenkuToc\"]") ?? [...document.querySelectorAll(".layout-content h2, .layout-content h3, main h2, main h3")].find((heading) => ["目录", "目錄"].includes(heading.textContent?.trim() ?? ""));
+				const parent = toc?.closest(".layout-content, main");
+				const before = parent && [...parent.children].find((child) => child.contains(toc));
+				return parent && before ? {
+					parent,
+					before
+				} : null;
+			}
+			if (page === "novel") {
+				const content = document.querySelector(".layout-content, main");
+				if (!content?.querySelector("h1, h2, h3")) return null;
+				const parent = content.querySelector(".metadata-stat")?.parentElement;
+				if (!parent) return null;
+				const children = [...parent.children].filter((element) => !element.hasAttribute("data-ntr-root"));
+				const comments = [...parent.querySelectorAll("h2, h3")].find((heading) => ["评论", "評論"].includes(heading.textContent?.trim() ?? ""));
+				const commentSection = comments && children.find((element) => element.contains(comments));
+				if (commentSection) return {
+					parent,
+					before: commentSection
+				};
+				const workspace = children.find((element) => [...element.querySelectorAll("button")].some((button) => ["导入工作区", "導入工作區"].includes(button.textContent?.trim() ?? "")));
+				return workspace ? {
+					parent,
+					before: children[children.indexOf(workspace) + 1] ?? null
+				} : null;
+			}
+			const heading = document.querySelector(".layout-content h1, main h1");
+			const parent = heading?.parentElement;
+			if (!parent) return null;
+			const children = [...parent.children].filter((element) => !element.hasAttribute("data-ntr-root"));
+			if (page === "workspace") return {
+				parent,
+				before: children.find((element) => element.matches("h2") || element.querySelector("h2")) ?? children[children.indexOf(heading) + 1] ?? null
+			};
+			const results = ".n-pagination, .n-spin, .n-result, .n-empty, .n-list";
+			return {
+				parent,
+				before: children.find((element) => element.matches(results) || element.querySelector(results)) ?? children.find((element) => element.matches("ul, [role=\"list\"]")) ?? null
+			};
+		}
+		wenkuIds(limit) {
+			const ids = [...document.querySelectorAll("a[href^=\"/wenku/\"]")].map((link) => new URL(link.href).pathname.split("/")[2]).filter((id) => Boolean(id));
+			return [...new Set(ids)].slice(0, limit);
+		}
+		webSearchApi(limit) {
+			return `/api/novel?${listQuery(location.search, listPage(location.search), limit)}`;
+		}
+		favoriteWebQuery(search, page, limit) {
+			const params = listQuery(search, page, limit);
+			params.set("sort", favoriteSort(search, this.favoriteCreateTimeFirst()));
+			return params;
+		}
+		favoriteWenkuQuery(search, page, limit) {
+			return new URLSearchParams({
+				page: String(page),
+				pageSize: String(limit),
+				sort: favoriteSort(search, this.favoriteCreateTimeFirst(), 0)
+			});
+		}
+		launchButtons(exclusions, automatic) {
+			return this.buttons("启动", "啟動").filter((button) => {
+				const item = button.closest(".n-list-item");
+				const title = item?.querySelector(".n-thing-header__title")?.textContent ?? "";
+				if (exclusions.some((keyword) => title.includes(keyword))) return false;
+				return !automatic || !item?.textContent?.includes("TypeError: Failed to fetch");
+			});
+		}
+		runningCount() {
+			return this.buttons("停止").length;
+		}
+		runningWorkerIds() {
+			return this.buttons("停止").map((button) => {
+				return [...(button.closest(".n-list-item")?.querySelector(".n-thing-header__title"))?.childNodes ?? []].filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent ?? "").join("").trim();
+			});
+		}
+		pipelineTranslating() {
+			return [...document.querySelectorAll(".task-list > .n-card .n-card-header .n-tag")].some((tag) => ["翻译中", "翻譯中"].includes(tag.textContent?.trim() ?? ""));
+		}
+		retryPipelineTasks(moveToTop, signal) {
+			const actions = [...document.querySelectorAll(".task-list > .n-card .n-card-header")].filter((header) => !header.closest("[data-ntr-root]")).map((header) => ({
+				retry: header.querySelector("button.n-button--warning-type"),
+				top: header.querySelector("button")
+			})).filter((action) => action.retry && !action.retry.disabled);
+			if (moveToTop) for (const { top } of [...actions].reverse()) {
+				signal.throwIfAborted();
+				if (top?.isConnected && !top.disabled) top.click();
+			}
+			let retried = 0;
+			for (const { retry } of actions) {
+				signal.throwIfAborted();
+				if (!retry?.isConnected || retry.disabled) continue;
+				retry.click();
+				retried++;
+			}
+			return retried;
+		}
+		favoriteCreateTimeFirst() {
+			return parseRecord(localStorage.getItem("setting"))?.favoriteCreateTimeFirst === true;
+		}
+		buttons(...labels) {
+			return [...document.querySelectorAll("button")].filter((button) => !button.disabled && !button.closest("[data-ntr-root]") && Boolean(button.closest(".n-list-item .n-thing")) && labels.some((label) => button.textContent?.trim() === label));
+		}
+	};
 	var WorkspaceService = class {
 		storage;
 		constructor(storage) {
@@ -414,6 +562,7 @@ SOFTWARE.
 		}
 		async upsertWorkers(kind, workers, signal) {
 			return this.mutate(kind, signal, (data) => {
+				this.assertWorkersStopped(workers.map((worker) => worker.id));
 				for (const worker of workers) {
 					const index = data.workers.findIndex((existing) => existing.id === worker.id);
 					if (index < 0) data.workers.push(worker);
@@ -428,6 +577,7 @@ SOFTWARE.
 		async removeWorkers(kind, exclusions, signal) {
 			return this.mutate(kind, signal, (data) => {
 				const before = data.workers.length;
+				this.assertWorkersStopped(data.workers.filter((worker) => !exclusions.some((keyword) => worker.id.includes(keyword))).map((worker) => worker.id));
 				data.workers = data.workers.filter((worker) => exclusions.some((keyword) => worker.id.includes(keyword)));
 				return before - data.workers.length;
 			});
@@ -481,6 +631,12 @@ SOFTWARE.
 		}
 		key(kind) {
 			return `workspace-${kind}`;
+		}
+		assertWorkersStopped(ids) {
+			if (!isPipelineWorkspace(location.pathname)) return;
+			const running = new Set(new SiteAdapter().runningWorkerIds());
+			const id = ids.find((id) => running.has(id));
+			if (id !== void 0) throw new Error(`請先停止翻譯器「${id}」後再修改或刪除`);
 		}
 		async mutate(kind, signal, change) {
 			signal.throwIfAborted();
@@ -581,8 +737,11 @@ SOFTWARE.
 			this.notifications.dispose();
 		}
 		syncWorkspace() {
-			const kind = workspaceKind(location.pathname);
-			if (kind) this.workspace.refresh(kind, this.routeController.signal).catch((error) => this.notifications.error(error));
+			const stores = new Set([workspaceKind(location.pathname), workerWorkspaceKind(location.pathname)]);
+			for (const kind of stores) {
+				if (!kind) continue;
+				this.workspace.refresh(kind, this.routeController.signal).catch((error) => this.notifications.error(error));
+			}
 		}
 	};
 	var AuthService = class {
@@ -629,117 +788,6 @@ SOFTWARE.
 				}
 			}
 			throw new Error("API 重試已達上限");
-		}
-	};
-	function listQuery(search, page, limit) {
-		const route = new URLSearchParams(search);
-		const selected = route.getAll("selected");
-		const mask = selectedNumber(selected[0], 255);
-		const providers = [
-			"kakuyomu",
-			"syosetu",
-			"novelup",
-			"hameln",
-			"pixiv",
-			"alphapolis"
-		].filter((_, index) => (mask & 1 << index) !== 0);
-		return new URLSearchParams({
-			page: String(page),
-			pageSize: String(limit),
-			query: route.get("query") ?? "",
-			provider: providers.join(","),
-			type: String(selectedNumber(selected[1], 0)),
-			level: String(selectedNumber(selected[2], 0)),
-			translate: String(selectedNumber(selected[3], 0)),
-			sort: String(selectedNumber(selected[4], 0))
-		});
-	}
-	function listPage(search) {
-		return Math.max(0, selectedNumber(new URLSearchParams(search).get("page") ?? void 0, 1) - 1);
-	}
-	function favoriteSort(search, createTimeFirst, offset = 4) {
-		return selectedNumber(new URLSearchParams(search).getAll("selected")[offset], 0) === 0 ? createTimeFirst ? "create" : "update" : createTimeFirst ? "update" : "create";
-	}
-	function selectedNumber(value, fallback) {
-		const parsed = value === void 0 || value === "" ? NaN : Number(value);
-		return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : fallback;
-	}
-	var SiteAdapter = class {
-		toolboxMountPoint() {
-			const page = pageKind(location.pathname);
-			if (page === "other") return null;
-			if (page === "novel" || page === "wenku") {
-				const content = document.querySelector(".layout-content, main");
-				if (!content?.querySelector("h1, h2, h3")) return null;
-				const parent = page === "novel" ? content.querySelector(".metadata-stat")?.parentElement : content;
-				if (!parent) return null;
-				const children = [...parent.children].filter((element) => !element.hasAttribute("data-ntr-root"));
-				if (page === "novel") {
-					const comments = [...parent.querySelectorAll("h2, h3")].find((heading) => ["评论", "評論"].includes(heading.textContent?.trim() ?? ""));
-					const commentSection = comments && children.find((element) => element.contains(comments));
-					if (commentSection) return {
-						parent,
-						before: commentSection
-					};
-					const workspace = children.find((element) => [...element.querySelectorAll("button")].some((button) => ["导入工作区", "導入工作區"].includes(button.textContent?.trim() ?? "")));
-					return workspace ? {
-						parent,
-						before: children[children.indexOf(workspace) + 1] ?? null
-					} : null;
-				}
-				return {
-					parent,
-					before: children[0] ?? null
-				};
-			}
-			const heading = document.querySelector(".layout-content h1, main h1");
-			const parent = heading?.parentElement;
-			if (!parent) return null;
-			const children = [...parent.children].filter((element) => !element.hasAttribute("data-ntr-root"));
-			if (page === "workspace") return {
-				parent,
-				before: children.find((element) => element.matches("h2") || element.querySelector("h2")) ?? children[children.indexOf(heading) + 1] ?? null
-			};
-			return {
-				parent,
-				before: children.find((element) => element.matches(".n-pagination")) ?? children.find((element) => element.matches("ul, [role=\"list\"]")) ?? null
-			};
-		}
-		wenkuIds(limit) {
-			const ids = [...document.querySelectorAll("a[href^=\"/wenku/\"]")].map((link) => new URL(link.href).pathname.split("/")[2]).filter((id) => Boolean(id));
-			return [...new Set(ids)].slice(0, limit);
-		}
-		webSearchApi(limit) {
-			return `/api/novel?${listQuery(location.search, listPage(location.search), limit)}`;
-		}
-		favoriteWebQuery(search, page, limit) {
-			const params = listQuery(search, page, limit);
-			params.set("sort", favoriteSort(search, this.favoriteCreateTimeFirst()));
-			return params;
-		}
-		favoriteWenkuQuery(search, page, limit) {
-			return new URLSearchParams({
-				page: String(page),
-				pageSize: String(limit),
-				sort: favoriteSort(search, this.favoriteCreateTimeFirst(), 0)
-			});
-		}
-		launchButtons(exclusions, automatic) {
-			return this.buttons("启动", "啟動").filter((button) => {
-				const item = button.closest(".n-list-item");
-				const title = item?.querySelector(".n-thing-header__title")?.textContent ?? "";
-				if (exclusions.some((keyword) => title.includes(keyword))) return false;
-				return !automatic || !item?.textContent?.includes("TypeError: Failed to fetch");
-			});
-		}
-		runningCount() {
-			return this.buttons("停止").length;
-		}
-		favoriteCreateTimeFirst() {
-			return parseRecord(localStorage.getItem("setting"))?.favoriteCreateTimeFirst === true;
-		}
-		buttons(...labels) {
-			return [...document.querySelectorAll("button")].filter((button) => !button.disabled && !button.closest("[data-ntr-root]") && Boolean(button.closest(".n-list-item .n-thing")) && labels.some((label) => button.textContent?.trim() === label));
 		}
 	};
 	var TranslatorService = class {
@@ -1016,6 +1064,19 @@ SOFTWARE.
 	function exclusions(value) {
 		return value.split(/[,，]/).map((word) => word.trim()).filter(Boolean);
 	}
+	function concurrencySetting() {
+		return {
+			...numberSetting("並發數", 1, 1),
+			description: "每個 beta 翻譯器的並發數（1–100）",
+			visible: (_, pathname) => isPipelineWorkspace(pathname)
+		};
+	}
+	function workerConcurrency(settings) {
+		if (!isPipelineWorkspace(location.pathname)) return {};
+		const concurrency = numberValue(settings, "並發數");
+		if (concurrency > 100) throw new Error("並發數必須介於 1 和 100");
+		return { concurrency };
+	}
 	var AddSakuraTranslatorModule = class {
 		workspace;
 		id = "add-sakura";
@@ -1025,6 +1086,7 @@ SOFTWARE.
 			numberSetting("數量", 5, 1),
 			stringSetting("名稱", "NTR translator "),
 			stringSetting("鏈接", "https://sakura-share.one"),
+			concurrencySetting(),
 			stringSetting("bind", "none")
 		];
 		constructor(workspace) {
@@ -1037,11 +1099,13 @@ SOFTWARE.
 			const count = numberValue(this.settings, "數量");
 			const prefix = stringValue(this.settings, "名稱");
 			const endpoint = stringValue(this.settings, "鏈接");
+			const concurrency = workerConcurrency(this.settings);
 			const workers = Array.from({ length: count }, (_, index) => ({
 				id: `${prefix}${index + 1}`,
 				endpoint,
 				prevSegLength: 500,
-				segLength: 500
+				segLength: 500,
+				...concurrency
 			}));
 			return {
 				status: "success",
@@ -1061,6 +1125,7 @@ SOFTWARE.
 			stringSetting("模型", "deepseek-chat"),
 			stringSetting("鏈接", "https://api.deepseek.com"),
 			stringSetting("Key", "sk-wait-for-input"),
+			concurrencySetting(),
 			stringSetting("bind", "none")
 		];
 		constructor(workspace) {
@@ -1075,15 +1140,19 @@ SOFTWARE.
 			const model = stringValue(this.settings, "模型");
 			const endpoint = stringValue(this.settings, "鏈接");
 			const key = stringValue(this.settings, "Key");
+			const concurrency = workerConcurrency(this.settings);
 			const workers = Array.from({ length: count }, (_, index) => ({
 				id: `${prefix}${index + 1}`,
 				model,
 				endpoint,
-				key
+				key,
+				...concurrency
 			}));
+			const kind = workerWorkspaceKind(location.pathname);
+			if (kind !== "gpt" && kind !== "gpt-pipeline") throw new Error("請先開啟 GPT 工作區");
 			return {
 				status: "success",
-				message: `已新增或更新 ${await this.workspace.upsertWorkers("gpt", workers, signal)} 個 GPT 翻譯器`
+				message: `已新增或更新 ${await this.workspace.upsertWorkers(kind, workers, signal)} 個 GPT 翻譯器`
 			};
 		}
 		dispose() {}
@@ -1101,7 +1170,7 @@ SOFTWARE.
 			return workspaceKind(pathname) !== null;
 		}
 		async execute({ signal }) {
-			const kind = workspaceKind(location.pathname);
+			const kind = workerWorkspaceKind(location.pathname);
 			if (!kind) throw new Error("請先開啟翻譯器工作區");
 			return {
 				status: "success",
@@ -1297,18 +1366,30 @@ SOFTWARE.
 				status: "success",
 				message: ""
 			};
-			if (Date.now() < this.nextRun || this.site.runningCount() > 0) return quiet;
+			const pipeline = isPipelineWorkspace(location.pathname);
+			if (Date.now() < this.nextRun || (pipeline ? this.site.pipelineTranslating() : this.site.runningCount() > 0)) return quiet;
 			if (this.attempts >= numberValue(this.settings, "最大重試次數")) return quiet;
 			const kind = workspaceKind(location.pathname);
 			if (!kind) return quiet;
-			if (!this.workspace.unfinishedCount(kind)) return quiet;
-			const retry = await this.workspace.retryUnfinishedJobs(kind, booleanValue(this.settings, "置頂重試任務"), signal);
+			const moveToTop = booleanValue(this.settings, "置頂重試任務");
+			let retry;
+			if (pipeline) {
+				const retried = this.site.retryPipelineTasks(moveToTop, signal);
+				if (!retried) return quiet;
+				retry = {
+					retried,
+					skipped: 0
+				};
+			} else {
+				if (!this.workspace.unfinishedCount(kind)) return quiet;
+				retry = await this.workspace.retryUnfinishedJobs(kind, moveToTop, signal);
+			}
 			this.attempts++;
 			this.nextRun = Date.now() + Math.min(6e4, 1e3 * 2 ** Math.min(this.attempts - 1, 6));
 			if (booleanValue(this.settings, "重啟翻譯器")) await this.translators.launch(readLaunchOptions(this.launchSettings, true), signal);
 			return {
 				status: "success",
-				message: `已重排 ${retry.retried} 個任務，跳過 ${retry.skipped} 個已排任務（第 ${this.attempts} 輪）`
+				message: pipeline ? `已重試 ${retry.retried} 個 beta 任務的失敗章節（第 ${this.attempts} 輪）` : `已重排 ${retry.retried} 個任務，跳過 ${retry.skipped} 個已排任務（第 ${this.attempts} 輪）`
 			};
 		}
 		dispose() {
@@ -1537,7 +1618,7 @@ SOFTWARE.
 		summary = document.createElement("span");
 		feedback = document.createElement("div");
 		layoutObserver = new MutationObserver((records) => {
-			if (!this.host.isConnected || records.some((record) => record.target === this.parent && [...record.addedNodes, ...record.removedNodes].some((node) => node !== this.host))) this.schedulePlacement();
+			if (!this.host.isConnected || records.some((record) => this.parent?.contains(record.target) && [...record.addedNodes, ...record.removedNodes].some((node) => node !== this.host))) this.schedulePlacement();
 		});
 		themeObserver = new MutationObserver(() => this.syncTheme());
 		selected = "queue-sakura";
@@ -1697,7 +1778,7 @@ SOFTWARE.
 			else this.execute.removeAttribute("aria-pressed");
 			this.execute.classList.toggle("danger", module.id === "delete-translators");
 			this.summary.textContent = this.isQueue() ? this.queueSummary(module) : this.modules.some((item) => item.kind === "continuous" && this.runner.isEnabled(item)) ? "自動重試已啟用" : "";
-			this.note.textContent = this.isQueue() ? "套用目前頁面範圍 · 設定自動儲存 · 僅加入佇列" : module.id === "delete-translators" ? "刪除目前工作區的翻譯器，保留名稱符合「排除」的項目。" : "套用目前工作區 · 設定自動儲存";
+			this.note.textContent = this.isQueue() ? "套用目前頁面範圍 · 設定自動儲存 · 僅加入佇列" : isPipelineWorkspace(location.pathname) ? module.id === "auto-retry" ? "重試目前篩選中任務的失敗章節；請選「全部」或「未完成」。" : workspaceKind(location.pathname) === "gpt" ? "GPT beta 翻譯器獨立管理，任務與原版 GPT 工作區共用。" : "Sakura beta 的翻譯器與任務皆與原版 Sakura 工作區共用。" : module.id === "delete-translators" ? "刪除目前工作區的翻譯器，保留名稱符合「排除」的項目。" : "套用目前工作區 · 設定自動儲存";
 			this.execute.title = this.isQueue() ? `${this.engineName(this.selected)} · ${this.summary.textContent} · 僅加入佇列` : this.execute.textContent;
 		}
 		async runSelected() {
