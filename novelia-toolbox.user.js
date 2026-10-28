@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NTR ToolBox
 // @namespace    http://tampermonkey.net/
-// @version      1.0.1
+// @version      1.0.2
 // @author       TheNano
 // @description  ToolBox for Novel Translate bot website
 // @license      MIT
@@ -421,6 +421,20 @@ SOFTWARE.
 		toolboxMountPoint() {
 			const page = pageKind(location.pathname);
 			if (page === "other") return null;
+			const regionLabel = {
+				novels: "网络小说列表",
+				wenkus: "文库小说列表",
+				"favorite-web": "网络小说收藏列表",
+				"favorite-wenku": "文库小说收藏列表"
+			}[page];
+			const region = regionLabel ? document.querySelector(`[role="region"][aria-label="${regionLabel}"]`) : null;
+			if (region) {
+				const before = [...region.children].find((element) => element.matches("nav[aria-label=\"分页\"], [data-orientation=\"horizontal\"]"));
+				return before ? {
+					parent: region,
+					before
+				} : null;
+			}
 			if (page === "wenku") {
 				const toc = document.querySelector(".n-tabs-tab[data-name=\"wenkuToc\"]") ?? [...document.querySelectorAll(".layout-content h2, .layout-content h3, main h2, main h3")].find((heading) => ["目录", "目錄"].includes(heading.textContent?.trim() ?? ""));
 				const parent = toc?.closest(".layout-content, main");
@@ -449,13 +463,16 @@ SOFTWARE.
 				} : null;
 			}
 			const heading = document.querySelector(".layout-content h1, main h1");
-			const parent = heading?.parentElement;
+			const parent = page === "workspace" ? heading?.closest(".layout-content, main") : heading?.parentElement;
 			if (!parent) return null;
 			const children = [...parent.children].filter((element) => !element.hasAttribute("data-ntr-root"));
-			if (page === "workspace") return {
-				parent,
-				before: children.find((element) => element.matches("h2") || element.querySelector("h2")) ?? children[children.indexOf(heading) + 1] ?? null
-			};
+			if (page === "workspace") {
+				const headingRow = children.find((element) => element.contains(heading));
+				return {
+					parent,
+					before: children.find((element) => element.matches("h2") || element.querySelector("h2")) ?? children[children.indexOf(headingRow) + 1] ?? null
+				};
+			}
 			const results = ".n-pagination, .n-spin, .n-result, .n-empty, .n-list";
 			return {
 				parent,
@@ -483,8 +500,8 @@ SOFTWARE.
 		}
 		launchButtons(exclusions, automatic) {
 			return this.buttons("启动", "啟動").filter((button) => {
-				const item = button.closest(".n-list-item");
-				const title = item?.querySelector(".n-thing-header__title")?.textContent ?? "";
+				const item = this.workerItem(button);
+				const title = this.workerTitle(button)?.textContent ?? "";
 				if (exclusions.some((keyword) => title.includes(keyword))) return false;
 				return !automatic || !item?.textContent?.includes("TypeError: Failed to fetch");
 			});
@@ -494,16 +511,17 @@ SOFTWARE.
 		}
 		runningWorkerIds() {
 			return this.buttons("停止").map((button) => {
-				return [...(button.closest(".n-list-item")?.querySelector(".n-thing-header__title"))?.childNodes ?? []].filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent ?? "").join("").trim();
+				return [...this.workerTitle(button)?.childNodes ?? []].filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent ?? "").join("").trim();
 			});
 		}
 		pipelineTranslating() {
+			if ([...document.querySelectorAll(".task-item .task-card [role=\"progressbar\"][aria-valuetext]")].some((element) => /处理中\s*[1-9]\d*\s*章/.test(element.getAttribute("aria-valuetext") ?? ""))) return true;
 			return [...document.querySelectorAll(".task-list > .n-card .n-card-header .n-tag")].some((tag) => ["翻译中", "翻譯中"].includes(tag.textContent?.trim() ?? ""));
 		}
 		retryPipelineTasks(moveToTop, signal) {
-			const actions = [...document.querySelectorAll(".task-list > .n-card .n-card-header")].filter((header) => !header.closest("[data-ntr-root]")).map((header) => ({
-				retry: header.querySelector("button.n-button--warning-type"),
-				top: header.querySelector("button")
+			const actions = [...document.querySelectorAll(".task-item > .task-card .n-card-header, .task-list > .n-card .n-card-header")].filter((header) => !header.closest("[data-ntr-root]")).map((header) => ({
+				retry: header.querySelector("button[aria-label=\"重试失败\"], button.n-button--warning-type"),
+				top: header.closest(".task-item") ? header.querySelector("button[aria-label=\"移至队首\"]") : header.querySelector("button")
 			})).filter((action) => action.retry && !action.retry.disabled);
 			if (moveToTop) for (const { top } of [...actions].reverse()) {
 				signal.throwIfAborted();
@@ -522,7 +540,13 @@ SOFTWARE.
 			return parseRecord(localStorage.getItem("setting"))?.favoriteCreateTimeFirst === true;
 		}
 		buttons(...labels) {
-			return [...document.querySelectorAll("button")].filter((button) => !button.disabled && !button.closest("[data-ntr-root]") && Boolean(button.closest(".n-list-item .n-thing")) && labels.some((label) => button.textContent?.trim() === label));
+			return [...document.querySelectorAll("button")].filter((button) => !button.disabled && !button.closest("[data-ntr-root]") && Boolean(this.workerItem(button)) && labels.includes((button.getAttribute("aria-label") ?? button.textContent ?? "").trim()));
+		}
+		workerItem(button) {
+			return button.closest("ul[aria-label=\"翻译器列表\"] > li, .n-list-item:has(.n-thing)");
+		}
+		workerTitle(button) {
+			return this.workerItem(button)?.querySelector(".n-thing-header__title, div.text-ink") ?? null;
 		}
 	};
 	var WorkspaceService = class {
@@ -1778,7 +1802,7 @@ SOFTWARE.
 			else this.execute.removeAttribute("aria-pressed");
 			this.execute.classList.toggle("danger", module.id === "delete-translators");
 			this.summary.textContent = this.isQueue() ? this.queueSummary(module) : this.modules.some((item) => item.kind === "continuous" && this.runner.isEnabled(item)) ? "自動重試已啟用" : "";
-			this.note.textContent = this.isQueue() ? "套用目前頁面範圍 · 設定自動儲存 · 僅加入佇列" : isPipelineWorkspace(location.pathname) ? module.id === "auto-retry" ? "重試目前篩選中任務的失敗章節；請選「全部」或「未完成」。" : workspaceKind(location.pathname) === "gpt" ? "GPT beta 翻譯器獨立管理，任務與原版 GPT 工作區共用。" : "Sakura beta 的翻譯器與任務皆與原版 Sakura 工作區共用。" : module.id === "delete-translators" ? "刪除目前工作區的翻譯器，保留名稱符合「排除」的項目。" : "套用目前工作區 · 設定自動儲存";
+			this.note.textContent = this.isQueue() ? "套用目前頁面範圍 · 設定自動儲存 · 僅加入佇列" : isPipelineWorkspace(location.pathname) ? module.id === "auto-retry" ? "重試目前頁面顯示任務的失敗章節；若有篩選，請選「全部」或「未完成」。" : workspaceKind(location.pathname) === "gpt" ? "GPT beta 翻譯器獨立管理，任務與原版 GPT 工作區共用。" : "Sakura beta 的翻譯器與任務皆與原版 Sakura 工作區共用。" : module.id === "delete-translators" ? "刪除目前工作區的翻譯器，保留名稱符合「排除」的項目。" : "套用目前工作區 · 設定自動儲存";
 			this.execute.title = this.isQueue() ? `${this.engineName(this.selected)} · ${this.summary.textContent} · 僅加入佇列` : this.execute.textContent;
 		}
 		async runSelected() {
@@ -1826,7 +1850,11 @@ SOFTWARE.
 				this.themeObserver.disconnect();
 				for (let element = this.parent; element; element = element.parentElement) this.themeObserver.observe(element, {
 					attributes: true,
-					attributeFilter: ["class", "style"]
+					attributeFilter: [
+						"class",
+						"style",
+						"data-theme"
+					]
 				});
 				if (this.before) this.themeObserver.observe(this.before, {
 					attributes: true,
@@ -1838,7 +1866,8 @@ SOFTWARE.
 		syncTheme() {
 			if (!this.parent?.isConnected) return;
 			const channels = (getComputedStyle(this.parent).getPropertyValue("--n-color").trim() || getComputedStyle(document.body).backgroundColor).match(/[\d.]+/g)?.map(Number);
-			const dark = channels && channels.length >= 3 && channels[3] !== 0 ? channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722 < 128 : matchMedia("(prefers-color-scheme: dark)").matches;
+			const theme = this.parent.closest("[data-theme=\"dark\"], [data-theme=\"light\"]")?.getAttribute("data-theme");
+			const dark = theme ? theme === "dark" : channels && channels.length >= 3 && channels[3] !== 0 ? channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722 < 128 : matchMedia("(prefers-color-scheme: dark)").matches;
 			this.host.style.colorScheme = dark ? "dark" : "light";
 			this.host.dataset.theme = dark ? "dark" : "light";
 		}
