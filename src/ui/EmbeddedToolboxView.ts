@@ -255,7 +255,7 @@ export class EmbeddedToolboxView implements ToolboxView {
             ? '套用目前頁面範圍 · 設定自動儲存 · 僅加入佇列'
             : isPipelineWorkspace(location.pathname)
               ? module.id === 'auto-retry'
-                  ? '重試目前篩選中任務的失敗章節；請選「全部」或「未完成」。'
+                  ? '重試目前頁面顯示任務的失敗章節；若有篩選，請選「全部」或「未完成」。'
                   : workspaceKind(location.pathname) === 'gpt'
                     ? 'GPT beta 翻譯器獨立管理，任務與原版 GPT 工作區共用。'
                     : 'Sakura beta 的翻譯器與任務皆與原版 Sakura 工作區共用。'
@@ -341,7 +341,7 @@ export class EmbeddedToolboxView implements ToolboxView {
             ) {
                 this.themeObserver.observe(element, {
                     attributes: true,
-                    attributeFilter: ['class', 'style'],
+                    attributeFilter: ['class', 'style', 'data-theme'],
                 });
             }
             if (this.before) {
@@ -362,11 +362,15 @@ export class EmbeddedToolboxView implements ToolboxView {
             getComputedStyle(this.parent).getPropertyValue('--n-color').trim() ||
             getComputedStyle(document.body).backgroundColor;
         const channels = background.match(/[\d.]+/g)?.map(Number);
-        const dark =
-            channels && channels.length >= 3 && channels[3] !== 0
-                ? channels[0]! * 0.2126 + channels[1]! * 0.7152 + channels[2]! * 0.0722 <
-                  128
-                : matchMedia('(prefers-color-scheme: dark)').matches;
+        const theme = this.parent
+            .closest('[data-theme="dark"], [data-theme="light"]')
+            ?.getAttribute('data-theme');
+        const dark = theme
+            ? theme === 'dark'
+            : channels && channels.length >= 3 && channels[3] !== 0
+              ? channels[0]! * 0.2126 + channels[1]! * 0.7152 + channels[2]! * 0.0722 <
+                128
+              : matchMedia('(prefers-color-scheme: dark)').matches;
         this.host.style.colorScheme = dark ? 'dark' : 'light';
         this.host.dataset.theme = dark ? 'dark' : 'light';
     }

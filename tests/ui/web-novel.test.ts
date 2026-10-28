@@ -27,6 +27,63 @@ const page = () => {
         '<main style="--n-color: rgb(16, 16, 20)"><h1>网络小说</h1><div class="filters">篩選</div><div class="n-pagination">1</div><ul></ul><div class="n-pagination">2</div></main>';
 };
 
+it.each([
+    ['/novel', '网络小说列表'],
+    ['/wenku', '文库小说列表'],
+    ['/favorite/web/default', '网络小说收藏列表'],
+    ['/favorite/wenku/default', '文库小说收藏列表'],
+])(
+    'anchors the new %s layout after filters through every result state',
+    async (path, label) => {
+        history.replaceState(null, '', path);
+        document.body.innerHTML = `<main><div class="layout-content"><h1>小說</h1><div role="region" aria-label="${label}"><div id="selection"><ul><li>選擇</li></ul></div><div id="filters">篩選</div><div data-orientation="horizontal" id="separator"></div><div id="results" role="status">正在加载小说列表</div></div><aside><ul><li>收藏夾</li></ul></aside></div></main>`;
+        const { root } = fixture();
+        const host = document.querySelector('#ntr-web-novel')!;
+        const originalRoot = root();
+        expect(host.parentElement?.getAttribute('aria-label')).toBe(label);
+        expect(host.previousElementSibling?.id).toBe('filters');
+        expect(host.nextElementSibling?.id).toBe('separator');
+        for (const state of [
+            '<div role="alert">加载错误</div>',
+            '<div>空列表</div>',
+            '<ul class="n-list"><li>小說</li></ul>',
+            '<div role="status">加载中</div>',
+        ]) {
+            document.querySelector('#results')!.innerHTML = state;
+            await vi.runAllTimersAsync();
+            expect(host.nextElementSibling?.id).toBe('separator');
+            expect(root()).toBe(originalRoot);
+        }
+        document
+            .querySelector('#separator')!
+            .insertAdjacentHTML(
+                'beforebegin',
+                '<nav aria-label="分页" id="pagination">1</nav>',
+            );
+        await vi.runAllTimersAsync();
+        expect(host.nextElementSibling?.id).toBe('pagination');
+        expect(document.querySelectorAll('#ntr-web-novel')).toHaveLength(1);
+    },
+);
+
+it('mounts outside the new workspace heading row and follows data-theme changes', async () => {
+    history.replaceState(null, '', '/workspace/sakura-pipeline');
+    document.body.innerHTML =
+        '<main data-theme="dark"><div class="layout-content"><div id="title-row"><h1>Sakura工作区</h1><button>本地书架</button></div><div class="notice">公告</div><div id="workers-heading"><h2>翻译器</h2><button>全部启动</button></div><ul aria-label="翻译器列表"></ul></div></main>';
+    fixture();
+    const host = document.querySelector<HTMLElement>('#ntr-web-novel')!;
+    expect(host.parentElement?.className).toBe('layout-content');
+    expect(host.nextElementSibling?.id).toBe('workers-heading');
+    expect(document.querySelector('#title-row')!.contains(host)).toBe(false);
+    expect(host.dataset.theme).toBe('dark');
+    document.querySelector('main')!.setAttribute('data-theme', 'light');
+    await vi.runAllTimersAsync();
+    expect(host.dataset.theme).toBe('light');
+    document.querySelector('main')!.setAttribute('data-theme', 'dark');
+    await vi.runAllTimersAsync();
+    expect(host.dataset.theme).toBe('dark');
+});
+
 beforeEach(() => {
     vi.useFakeTimers();
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) =>

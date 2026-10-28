@@ -53,7 +53,7 @@ it('ships beta workspace routing and refreshes GPT worker and job stores separat
     if (script?.type !== 'chunk') throw new Error('Missing production userscript');
     history.replaceState(null, '', '/workspace/gpt-pipeline');
     document.body.innerHTML =
-        '<main style="--n-color: rgb(16, 16, 20)"><h1>GPT工作区BETA</h1><div class="notice">公告</div><section id="workers"><h2>翻译器</h2></section></main>';
+        '<main data-theme="dark"><div class="layout-content"><div id="title-row"><h1>GPT工作区</h1><button>本地书架</button></div><div class="notice">公告</div><section id="workers"><h2>翻译器</h2></section></div></main>';
     const stored = JSON.stringify({ workers: [], jobs: [], uncompletedJobs: [] });
     localStorage.setItem('workspace-gpt', stored);
     localStorage.setItem('workspace-gpt-pipeline', stored);
@@ -64,6 +64,8 @@ it('ships beta workspace routing and refreshes GPT worker and job stores separat
     try {
         window.eval(script.code);
         const host = document.querySelector('#ntr-web-novel')!;
+        expect(host.parentElement?.className).toBe('layout-content');
+        expect(host.getAttribute('data-theme')).toBe('dark');
         expect(host.nextElementSibling?.id).toBe('workers');
         expect(host.shadowRoot?.querySelectorAll('.module-tabs button')).toHaveLength(4);
         expect(events).toEqual(['workspace-gpt', 'workspace-gpt-pipeline']);

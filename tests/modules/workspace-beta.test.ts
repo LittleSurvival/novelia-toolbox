@@ -10,6 +10,64 @@ import { SiteAdapter } from '../../src/services/SiteAdapter';
 import { pageKind, workspaceKind, workerWorkspaceKind } from '../../src/util/routes';
 
 const context = () => ({ signal: new AbortController().signal, automatic: false });
+
+it('recognizes new worker controls and protects running worker IDs without endpoint suffixes', async () => {
+    history.replaceState(null, '', '/workspace/gpt-pipeline');
+    document.body.innerHTML = `<button aria-label="全部启动">全部启动</button><ul aria-label="翻译器列表">
+      <li><div><span class="text-ink">drag</span><div class="text-ink">keep<span>model@endpoint 0/1</span></div><button aria-label="停止">停止</button></div></li>
+      <li><div class="text-ink">start<span>model@endpoint</span></div><button aria-label="启动">启动</button></li>
+      <li><div class="text-ink">excluded</div><button aria-label="启动">启动</button></li>
+      <li><div class="text-ink">disabled</div><button disabled aria-label="启动">启动</button></li>
+      </ul><div class="task-item"><button aria-label="启动">启动</button></div>`;
+    const site = new SiteAdapter();
+    expect(site.launchButtons(['excluded'], false)).toHaveLength(1);
+    expect(site.runningWorkerIds()).toEqual(['keep']);
+    expect(site.runningCount()).toBe(1);
+    localStorage.setItem('workspace-gpt-pipeline', JSON.stringify(data('keep')));
+    const before = localStorage.getItem('workspace-gpt-pipeline');
+    const workspace = new WorkspaceService(localStorage);
+    await expect(
+        workspace.removeWorkers('gpt-pipeline', [], context().signal),
+    ).rejects.toThrow('請先停止');
+    await expect(
+        workspace.upsertWorkers(
+            'gpt-pipeline',
+            [{ id: 'keep', endpoint: 'changed' }],
+            context().signal,
+        ),
+    ).rejects.toThrow('請先停止');
+    expect(localStorage.getItem('workspace-gpt-pipeline')).toBe(before);
+});
+
+it('uses new task action labels, never substitutes delete/retry for a missing move button', () => {
+    document.body.innerHTML = `<button aria-label="重试失败" id="global-retry"></button><div class="task-item"><div class="task-card n-card"><div class="n-card-header"><button aria-label="重试失败" id="retry"></button><button aria-label="删除任务" id="delete"></button><div role="progressbar" aria-valuetext="共 10 章，成功 2 章，处理中 1 章，失败 3 章，等待 4 章"></div></div></div></div>`;
+    const site = new SiteAdapter();
+    expect(site.pipelineTranslating()).toBe(true);
+    document
+        .querySelector('[role="progressbar"]')!
+        .setAttribute(
+            'aria-valuetext',
+            '共 10 章，成功 2 章，处理中 0 章，失败 3 章，等待 5 章',
+        );
+    expect(site.pipelineTranslating()).toBe(false);
+    const clicks: string[] = [];
+    document
+        .querySelectorAll('button')
+        .forEach((button) =>
+            button.addEventListener('click', () => clicks.push(button.id)),
+        );
+    expect(site.retryPipelineTasks(true, context().signal)).toBe(1);
+    expect(clicks).toEqual(['retry']);
+    document
+        .querySelector('#retry')!
+        .insertAdjacentHTML(
+            'beforebegin',
+            '<button aria-label="移至队首" id="top"></button>',
+        );
+    document.querySelector('#top')!.addEventListener('click', () => clicks.push('top'));
+    expect(site.retryPipelineTasks(true, context().signal)).toBe(1);
+    expect(clicks).toEqual(['retry', 'top', 'retry']);
+});
 const data = (id: string) => ({
     workers: [{ id, endpoint: 'https://example.invalid' }],
     jobs: [{ task: 'web/p/n', description: 'fixture' }],

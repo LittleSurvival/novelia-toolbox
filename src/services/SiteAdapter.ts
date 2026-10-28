@@ -6,6 +6,28 @@ export class SiteAdapter {
     toolboxMountPoint(): { parent: HTMLElement; before: Element | null } | null {
         const page = pageKind(location.pathname);
         if (page === 'other') return null;
+        const listRegionLabels: Record<string, string> = {
+            novels: '网络小说列表',
+            wenkus: '文库小说列表',
+            'favorite-web': '网络小说收藏列表',
+            'favorite-wenku': '文库小说收藏列表',
+        };
+        const regionLabel = listRegionLabels[page];
+        const region = regionLabel
+            ? document.querySelector<HTMLElement>(
+                  `[role="region"][aria-label="${regionLabel}"]`,
+              )
+            : null;
+        if (region) {
+            // The separator remains mounted through loading/error/empty states.
+            // Stay inside the results region, after filters and selection controls.
+            const before = [...region.children].find((element) =>
+                element.matches(
+                    'nav[aria-label="分页"], [data-orientation="horizontal"]',
+                ),
+            );
+            return before ? { parent: region, before } : null;
+        }
         if (page === 'wenku') {
             // The cover banner and the volume gallery are separate content containers.
             // Keep the toolbar immediately above the TOC (including the new tabbed UI).
@@ -58,7 +80,11 @@ export class SiteAdapter {
         const heading = document.querySelector<HTMLElement>(
             '.layout-content h1, main h1',
         );
-        const parent = heading?.parentElement;
+        // Workspace headings now share a row with the local-bookshelf action.
+        const parent =
+            page === 'workspace'
+                ? heading?.closest<HTMLElement>('.layout-content, main')
+                : heading?.parentElement;
         if (!parent) {
             return null;
         }
@@ -67,12 +93,13 @@ export class SiteAdapter {
         );
         // Keep site-specific anchors here so layout changes do not affect the controls.
         if (page === 'workspace') {
+            const headingRow = children.find((element) => element.contains(heading!));
             const section = children.find(
                 (element) => element.matches('h2') || element.querySelector('h2'),
             );
             return {
                 parent,
-                before: section ?? children[children.indexOf(heading!) + 1] ?? null,
+                before: section ?? children[children.indexOf(headingRow!) + 1] ?? null,
             };
         }
         // CPage has no pagination while loading, on errors or for a single page.
@@ -116,9 +143,8 @@ export class SiteAdapter {
 
     launchButtons(exclusions: string[], automatic: boolean): HTMLButtonElement[] {
         return this.buttons('启动', '啟動').filter((button) => {
-            const item = button.closest('.n-list-item');
-            const title =
-                item?.querySelector('.n-thing-header__title')?.textContent ?? '';
+            const item = this.workerItem(button);
+            const title = this.workerTitle(button)?.textContent ?? '';
             if (exclusions.some((keyword) => title.includes(keyword))) {
                 return false;
             }
@@ -134,9 +160,7 @@ export class SiteAdapter {
 
     runningWorkerIds(): string[] {
         return this.buttons('停止').map((button) => {
-            const title = button
-                .closest('.n-list-item')
-                ?.querySelector('.n-thing-header__title');
+            const title = this.workerTitle(button);
             // Worker ID is header text; nested nodes contain model/endpoint/counters.
             return [...(title?.childNodes ?? [])]
                 .filter((node) => node.nodeType === Node.TEXT_NODE)
@@ -147,6 +171,17 @@ export class SiteAdapter {
     }
 
     pipelineTranslating(): boolean {
+        const progress = document.querySelectorAll(
+            '.task-item .task-card [role="progressbar"][aria-valuetext]',
+        );
+        if (
+            [...progress].some((element) =>
+                /处理中\s*[1-9]\d*\s*章/.test(
+                    element.getAttribute('aria-valuetext') ?? '',
+                ),
+            )
+        )
+            return true;
         return [
             ...document.querySelectorAll('.task-list > .n-card .n-card-header .n-tag'),
         ].some((tag) => ['翻译中', '翻譯中'].includes(tag.textContent?.trim() ?? ''));
@@ -156,15 +191,21 @@ export class SiteAdapter {
         // Pipeline failures live in TaskState, not uncompletedJobs. Use the native
         // card actions so completed chapters and cached segments stay intact.
         const actions = [
-            ...document.querySelectorAll('.task-list > .n-card .n-card-header'),
+            ...document.querySelectorAll(
+                '.task-item > .task-card .n-card-header, .task-list > .n-card .n-card-header',
+            ),
         ]
             .filter((header) => !header.closest('[data-ntr-root]'))
             .map((header) => ({
                 retry: header.querySelector<HTMLButtonElement>(
-                    'button.n-button--warning-type',
+                    'button[aria-label="重试失败"], button.n-button--warning-type',
                 ),
-                // PipelineTaskCard renders top, bottom, retry (if failed), delete.
-                top: header.querySelector<HTMLButtonElement>('button'),
+                // New cards can omit move controls entirely for a single job.
+                top: header.closest('.task-item')
+                    ? header.querySelector<HTMLButtonElement>(
+                          'button[aria-label="移至队首"]',
+                      )
+                    : header.querySelector<HTMLButtonElement>('button'),
             }))
             .filter((action) => action.retry && !action.retry.disabled);
         if (moveToTop) {
@@ -194,8 +235,28 @@ export class SiteAdapter {
             (button) =>
                 !button.disabled &&
                 !button.closest('[data-ntr-root]') &&
-                Boolean(button.closest('.n-list-item .n-thing')) &&
-                labels.some((label) => button.textContent?.trim() === label),
+                Boolean(this.workerItem(button)) &&
+                labels.includes(
+                    (
+                        button.getAttribute('aria-label') ??
+                        button.textContent ??
+                        ''
+                    ).trim(),
+                ),
+        );
+    }
+
+    private workerItem(button: HTMLButtonElement): Element | null {
+        return button.closest(
+            'ul[aria-label="翻译器列表"] > li, .n-list-item:has(.n-thing)',
+        );
+    }
+
+    private workerTitle(button: HTMLButtonElement): Element | null {
+        return (
+            this.workerItem(button)?.querySelector(
+                '.n-thing-header__title, div.text-ink',
+            ) ?? null
         );
     }
 }
