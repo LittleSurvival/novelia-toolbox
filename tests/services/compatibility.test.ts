@@ -32,7 +32,7 @@ const fixture = (id: string) => ({
 });
 
 describe('authentication and workspace compatibility', () => {
-    it('reads and follows auth-v2 changes without resurrecting legacy sessions on logout', () => {
+    it('reads and follows web-kit session changes without resurrecting legacy sessions on logout', () => {
         const auth = new AuthService(localStorage);
         localStorage.setItem(
             'authInfo',
@@ -40,19 +40,30 @@ describe('authentication and workspace compatibility', () => {
         );
         localStorage.setItem(
             'auth-v2',
+            JSON.stringify({ token: 'stale-auth-v2-token', adminMode: false }),
+        );
+        expect(auth.getToken()).toBeNull();
+        localStorage.setItem(
+            'web-kit:session:v1',
             JSON.stringify({ token: 'new-token', adminMode: false }),
         );
         expect(auth.getToken()).toBe('new-token');
-        localStorage.setItem('auth-v2', JSON.stringify({ token: 'rotated-token' }));
+        localStorage.setItem(
+            'web-kit:session:v1',
+            JSON.stringify({ token: 'rotated-token' }),
+        );
         expect(auth.getToken()).toBe('rotated-token');
-        localStorage.removeItem('auth-v2');
+        localStorage.removeItem('web-kit:session:v1');
         expect(auth.getToken()).toBeNull();
-        localStorage.setItem('auth-v2', '{bad json');
+        localStorage.setItem('web-kit:session:v1', '{bad json');
         expect(auth.getToken()).toBeNull();
     });
 
     it('uses modern bearer credentials and does not retry unauthorized API calls', async () => {
-        localStorage.setItem('auth-v2', JSON.stringify({ token: 'fixture-token' }));
+        localStorage.setItem(
+            'web-kit:session:v1',
+            JSON.stringify({ token: 'fixture-token' }),
+        );
         const fetcher = vi.fn().mockResolvedValue(new Response('{}', { status: 401 }));
         vi.stubGlobal('fetch', fetcher);
         const api = new ApiService(new AuthService(localStorage));
