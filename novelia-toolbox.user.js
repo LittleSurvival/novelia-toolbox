@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         NTR ToolBox
 // @namespace    http://tampermonkey.net/
-// @version      1.0.2
+// @version      1.0.3
 // @author       TheNano
 // @description  ToolBox for Novel Translate bot website
 // @license      MIT
@@ -429,14 +429,19 @@ SOFTWARE.
 			}[page];
 			const region = regionLabel ? document.querySelector(`[role="region"][aria-label="${regionLabel}"]`) : null;
 			if (region) {
-				const before = [...region.children].find((element) => element.matches("nav[aria-label=\"分页\"], [data-orientation=\"horizontal\"]"));
-				return before ? {
-					parent: region,
+				const before = region.querySelector("nav[aria-label=\"分页\"], [data-orientation=\"horizontal\"]");
+				return before?.parentElement ? {
+					parent: before.parentElement,
 					before
 				} : null;
 			}
 			if (page === "wenku") {
 				const toc = document.querySelector(".n-tabs-tab[data-name=\"wenkuToc\"]") ?? [...document.querySelectorAll(".layout-content h2, .layout-content h3, main h2, main h3")].find((heading) => ["目录", "目錄"].includes(heading.textContent?.trim() ?? ""));
+				const tabs = toc?.closest(".novel-bottom-tabs") ?? toc?.closest(".n-tabs");
+				if (tabs?.parentElement) return {
+					parent: tabs.parentElement,
+					before: tabs
+				};
 				const parent = toc?.closest(".layout-content, main");
 				const before = parent && [...parent.children].find((child) => child.contains(toc));
 				return parent && before ? {
@@ -450,7 +455,7 @@ SOFTWARE.
 				const parent = content.querySelector(".metadata-stat")?.parentElement;
 				if (!parent) return null;
 				const children = [...parent.children].filter((element) => !element.hasAttribute("data-ntr-root"));
-				const comments = [...parent.querySelectorAll("h2, h3")].find((heading) => ["评论", "評論"].includes(heading.textContent?.trim() ?? ""));
+				const comments = parent.querySelector(".novel-bottom-tabs") ?? [...parent.querySelectorAll("h2, h3")].find((heading) => ["评论", "評論"].includes(heading.textContent?.trim() ?? ""));
 				const commentSection = comments && children.find((element) => element.contains(comments));
 				if (commentSection) return {
 					parent,
@@ -463,6 +468,14 @@ SOFTWARE.
 				} : null;
 			}
 			const heading = document.querySelector(".layout-content h1, main h1");
+			if (page === "workspace" && heading) {
+				let before = [...heading.closest(".layout-content, main")?.querySelectorAll("h2") ?? []].find((element) => ["翻译器", "翻譯器"].includes(element.textContent?.trim() ?? ""));
+				while (before?.parentElement && !before.parentElement.contains(heading)) before = before.parentElement;
+				if (before?.parentElement) return {
+					parent: before.parentElement,
+					before
+				};
+			}
 			const parent = page === "workspace" ? heading?.closest(".layout-content, main") : heading?.parentElement;
 			if (!parent) return null;
 			const children = [...parent.children].filter((element) => !element.hasAttribute("data-ntr-root"));
@@ -774,7 +787,7 @@ SOFTWARE.
 			this.storage = storage;
 		}
 		getToken() {
-			const auth = parseRecord(this.storage.getItem("auth-v2"));
+			const auth = parseRecord(this.storage.getItem("web-kit:session:v1"));
 			return typeof auth?.token === "string" && auth.token.trim().length > 0 ? auth.token : null;
 		}
 	};
