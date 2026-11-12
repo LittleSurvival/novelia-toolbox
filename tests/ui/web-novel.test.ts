@@ -32,6 +32,94 @@ it.each([
     ['/wenku', '文库小说列表'],
     ['/favorite/web/default', '网络小说收藏列表'],
     ['/favorite/wenku/default', '文库小说收藏列表'],
+])('keeps the nested %s toolbar above single-page results', async (path, label) => {
+    history.replaceState(null, '', path);
+    document.body.innerHTML = `<main><div role="region" aria-label="${label}"><div class="flex gap-5"><div id="content" class="min-w-0 flex-1 py-6"><div><div><h1>小說</h1></div></div><div id="filters">篩選</div><div id="separator" role="separator" data-orientation="horizontal"></div><div id="results"><div class="grid"><a href="/wenku/example">一本小說</a></div></div></div><aside><h2>側欄</h2></aside></div></div></main>`;
+    const { root, change } = fixture();
+    const originalRoot = root();
+    const host = document.querySelector('#ntr-web-novel')!;
+    expect(host.parentElement?.id).toBe('content');
+    expect(host.previousElementSibling?.id).toBe('filters');
+    expect(host.nextElementSibling?.id).toBe('separator');
+    root().querySelector<HTMLButtonElement>('.settings-toggle')!.click();
+    change('模式', '重翻');
+    for (const markup of [
+        '<div role="status">加载中</div>',
+        '<div role="alert">加载错误</div>',
+        '<div>没有小说</div>',
+        '<div class="grid"><a href="/wenku/example">一本小說</a></div>',
+    ]) {
+        document.querySelector('#results')!.innerHTML = markup;
+        await vi.runAllTimersAsync();
+        expect(host.nextElementSibling?.id).toBe('separator');
+    }
+    document
+        .querySelector('#separator')!
+        .insertAdjacentHTML(
+            'beforebegin',
+            '<nav aria-label="分页" id="pagination">1 2</nav>',
+        );
+    await vi.runAllTimersAsync();
+    expect(host.nextElementSibling?.id).toBe('pagination');
+    document.querySelector('#pagination')!.remove();
+    await vi.runAllTimersAsync();
+    expect(host.nextElementSibling?.id).toBe('separator');
+    expect(root()).toBe(originalRoot);
+    expect(root().querySelector('.settings-toggle')?.getAttribute('aria-expanded')).toBe(
+        'true',
+    );
+    expect(
+        root().querySelector('[aria-label="翻譯模式"] [aria-checked="true"]')
+            ?.textContent,
+    ).toBe('重翻');
+    expect(document.querySelectorAll('#ntr-web-novel')).toHaveLength(1);
+});
+
+it.each(['/workspace/sakura-pipeline', '/workspace/gpt-pipeline'])(
+    'keeps %s controls inside the content column below notices',
+    (path) => {
+        history.replaceState(null, '', path);
+        document.body.innerHTML =
+            '<main><div id="container"><div class="flex gap-5"><div id="content" class="min-w-0 flex-1 py-6"><div><div><div><h1>工作区</h1><button>本地书架</button></div></div></div><div id="notice">公告</div><div id="workers"><h2>翻译器</h2><button>全部启动</button></div><ul aria-label="翻译器列表"></ul><div><h2>任务队列</h2></div></div><aside><h2>說明</h2></aside></div></div></main>';
+        fixture();
+        const host = document.querySelector('#ntr-web-novel')!;
+        expect(host.parentElement?.id).toBe('content');
+        expect(host.previousElementSibling?.id).toBe('notice');
+        expect(host.nextElementSibling?.id).toBe('workers');
+    },
+);
+
+it('keeps wenku controls inside the new content column above the bottom tabs', () => {
+    history.replaceState(null, '', '/wenku/example');
+    document.body.innerHTML =
+        '<main><div id="banner"><h2>小說</h2></div><div><div class="flex gap-5"><div id="content" class="min-w-0 flex-1 py-6"><p>簡介</p><div id="gallery">插圖</div><div class="novel-bottom-tabs" id="tabs"><div class="n-tabs"><div class="n-tabs-tab" data-name="wenkuToc">目录</div></div></div></div><aside>側欄</aside></div></div></main>';
+    fixture();
+    const host = document.querySelector('#ntr-web-novel')!;
+    expect(host.parentElement?.id).toBe('content');
+    expect(host.previousElementSibling?.id).toBe('gallery');
+    expect(host.nextElementSibling?.id).toBe('tabs');
+});
+
+it('keeps web detail controls after logs when comments switch to glossary', async () => {
+    history.replaceState(null, '', '/novel/syosetu/example');
+    document.body.innerHTML =
+        '<main><div class="flex gap-5"><div id="content"><h1>小說</h1><div class="metadata-stat"></div><div><button>导入工作区</button></div><div id="logs">工作區日誌</div><div class="novel-bottom-tabs" id="tabs"><section aria-label="评论列表"><h2>评论</h2></section></div></div><aside><h2>目录</h2></aside></div></main>';
+    const { root } = fixture();
+    const originalRoot = root();
+    const host = document.querySelector('#ntr-web-novel')!;
+    document.querySelector('#tabs')!.innerHTML = '<div>术语表</div>';
+    await vi.runAllTimersAsync();
+    expect(host.parentElement?.id).toBe('content');
+    expect(host.previousElementSibling?.id).toBe('logs');
+    expect(host.nextElementSibling?.id).toBe('tabs');
+    expect(root()).toBe(originalRoot);
+});
+
+it.each([
+    ['/novel', '网络小说列表'],
+    ['/wenku', '文库小说列表'],
+    ['/favorite/web/default', '网络小说收藏列表'],
+    ['/favorite/wenku/default', '文库小说收藏列表'],
 ])(
     'anchors the new %s layout after filters through every result state',
     async (path, label) => {

@@ -20,13 +20,14 @@ export class SiteAdapter {
             : null;
         if (region) {
             // The separator remains mounted through loading/error/empty states.
-            // Stay inside the results region, after filters and selection controls.
-            const before = [...region.children].find((element) =>
-                element.matches(
-                    'nav[aria-label="分页"], [data-orientation="horizontal"]',
-                ),
+            // The region can wrap a content column and an optional sidebar.
+            // Use the anchor's parent, not the outer region or the title row.
+            const before = region.querySelector(
+                'nav[aria-label="分页"], [data-orientation="horizontal"]',
             );
-            return before ? { parent: region, before } : null;
+            return before?.parentElement
+                ? { parent: before.parentElement, before }
+                : null;
         }
         if (page === 'wenku') {
             // The cover banner and the volume gallery are separate content containers.
@@ -40,6 +41,8 @@ export class SiteAdapter {
                 ].find((heading) =>
                     ['目录', '目錄'].includes(heading.textContent?.trim() ?? ''),
                 );
+            const tabs = toc?.closest('.novel-bottom-tabs') ?? toc?.closest('.n-tabs');
+            if (tabs?.parentElement) return { parent: tabs.parentElement, before: tabs };
             const parent = toc?.closest<HTMLElement>('.layout-content, main');
             const before =
                 parent && [...parent.children].find((child) => child.contains(toc!));
@@ -56,9 +59,12 @@ export class SiteAdapter {
             const children = [...parent.children].filter(
                 (element) => !element.hasAttribute('data-ntr-root'),
             );
-            const comments = [...parent.querySelectorAll('h2, h3')].find((heading) =>
-                ['评论', '評論'].includes(heading.textContent?.trim() ?? ''),
-            );
+            // The comments heading disappears while the glossary tab is selected.
+            const comments =
+                parent.querySelector('.novel-bottom-tabs') ??
+                [...parent.querySelectorAll('h2, h3')].find((heading) =>
+                    ['评论', '評論'].includes(heading.textContent?.trim() ?? ''),
+                );
             const commentSection =
                 comments && children.find((element) => element.contains(comments));
             if (commentSection) return { parent, before: commentSection };
@@ -80,6 +86,19 @@ export class SiteAdapter {
         const heading = document.querySelector<HTMLElement>(
             '.layout-content h1, main h1',
         );
+        if (page === 'workspace' && heading) {
+            const content = heading.closest('.layout-content, main');
+            const workers = [...(content?.querySelectorAll('h2') ?? [])].find((element) =>
+                ['翻译器', '翻譯器'].includes(element.textContent?.trim() ?? ''),
+            );
+            // Find the shared content column even when the page title has wrappers.
+            // Inserting into main would place the toolbar above the whole page.
+            let before: Element | undefined = workers;
+            while (before?.parentElement && !before.parentElement.contains(heading)) {
+                before = before.parentElement;
+            }
+            if (before?.parentElement) return { parent: before.parentElement, before };
+        }
         // Workspace headings now share a row with the local-bookshelf action.
         const parent =
             page === 'workspace'
