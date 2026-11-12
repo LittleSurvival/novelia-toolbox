@@ -1,6 +1,6 @@
 # NTR ToolBox Userscript
 
-**Version:** v1.0.0
+**Version:** v1.0.3
 
 **Author:** TheNano (百合仙人)
 
