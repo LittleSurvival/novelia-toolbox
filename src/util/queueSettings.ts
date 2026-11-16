@@ -53,7 +53,7 @@ export function queueSettings(): SettingDefinition[] {
         {
             ...booleanSetting('使用瀏覽器爬蟲', false),
             visible: (_, pathname) =>
-                ['wenku', 'wenkus', 'novel', 'novels', 'favorite-wenku', 'favorite-web'].includes(pageKind(pathname)),
+                ['wenku','wenkus','novel','novels','favorite-wenku','favorite-web'].includes(pageKind(pathname)),
         },
         { ...stringSetting('bind', 'none'), label: '快捷鍵' },
     ];
